@@ -4,7 +4,7 @@ Versions follow `Major.Minor.Series.Build`. The build number rises by one for ev
 change that lands, so gaps between published versions are normal - not every build is
 released.
 
-## 0.5.502.1 (unreleased) - Usage answers name the file and line of every user, operators count as uses, and impact_of_change weighs what implements a contract
+## 0.5.502.1 (2026-10-13) - Usage answers name the file and line of every user, operators count as uses, and impact_of_change weighs what implements a contract
 
 **Who is affected.** Everyone on the MCP server: reconnect your client once - 16 tools of the
 default profile have a new description; no tool or parameter was added, removed or made
