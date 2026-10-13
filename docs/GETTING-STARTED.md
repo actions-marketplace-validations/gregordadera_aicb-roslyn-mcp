@@ -119,6 +119,8 @@ or `opencode.json` and writes the skill to `.agents/skills/`, where both read
 skills. To wire one whose folder does not exist yet, name it:
 `aicb init --hooks codex` or `aicb init --hooks opencode`. Codex reads a project's
 `.codex/config.toml` only once you have trusted the project in Codex.
+The Codex entry carries `tool_timeout_sec = 300`: Codex gives up on a tool call after
+60 seconds by default, and the first call on a large solution analyzes it.
 
 **Know this before it happens:** if your project has a folder for an agent harness
 aicb knows (`.claude/`, `.codex/`, `.opencode/`), `aicb init` also installs the
@@ -144,7 +146,8 @@ The server is started as `aicb mcp` over stdio. For clients that read `.mcp.json
 
 If you use the ZIP without `PATH`, put the absolute path of `cli\aicb.exe` into
 `command`. **Codex and OpenCode do not read `.mcp.json`** - add the same command
-(`aicb`, argument `mcp`) to `.codex/config.toml` (a `[mcp_servers.aicb]` table) or to
+(`aicb`, argument `mcp`) to `.codex/config.toml` (a `[mcp_servers.aicb]` table, with
+`tool_timeout_sec = 300` for the first analysis) or to
 the `mcp` section of `opencode.json`, as described in each client's MCP documentation.
 
 ## 5. Check the connection
