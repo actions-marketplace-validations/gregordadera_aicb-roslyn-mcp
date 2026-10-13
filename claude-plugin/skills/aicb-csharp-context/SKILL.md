@@ -111,7 +111,11 @@ change**. A purely additive change to a high-fan-in type is expected to read
 "high" - that is not a stop sign. Check instead whether any consumer relies on
 the specific value or on completeness. The risk level is calibrated on
 **production** fan-in (`productionImpactCount`); test callers are excluded,
-because updating them is mechanical.
+because updating them is mechanical. On an interface or abstract member or type
+the answer lists `implementers`, and `risk` then reads `riskBasis`: the same
+count plus the production types that implement it, since a signature change
+breaks those too (on a type only the ones naming it in their own base list;
+the ones inheriting it through a base class are listed under `indirect`).
 
 ## How far to trust an answer
 
