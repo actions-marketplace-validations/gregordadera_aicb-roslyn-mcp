@@ -34,7 +34,7 @@ The tools in this chapter answer four groups of questions:
 | Parameter | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `sessionId` | string | yes | - | Session id returned by `analyze_solution`, or an absolute `.sln` path for self-init. |
-| `symbol` | string | yes | - | Exact (case-sensitive) name of a type, method, property, field, event or enum member - or the qualified `Type.Member` form to disambiguate a member. `Type.Type` asks for a type's constructor. |
+| `symbol` | string | yes | - | Exact (case-sensitive) name of a type, method, property, field, event, enum member or user-defined operator (by its metadata name, such as `op_Equality`) - or the qualified `Type.Member` form to disambiguate a member. `Type.Type` asks for a type's constructor. |
 
 **What a name resolves to**
 
@@ -45,6 +45,7 @@ The tools in this chapter answer four groups of questions:
 | Property or field name | `property` / `field` | The methods that read or write it. A CommunityToolkit `[ObservableProperty]` backing field additionally lists the consumers of its generated property - the two are one symbol pair to a caller. |
 | Event name | `event` | The methods that raise, subscribe to or unsubscribe from it. The subscriber types are also available through `find_by_event_subscription`. |
 | Enum member (bare `Partial` or qualified `BackupStatus.Partial`) | `enum_member` | The methods that reference it - a switch label, a comparison, an assignment. |
+| User-defined operator or conversion by its metadata name (bare `op_Equality` or qualified `Money.op_Implicit`) | `operator` | The code that uses it - `a == b`, `a + b`, `++`, `+=`, a cast and an implicit conversion of a value - in method, accessor, constructor, initializer and operator bodies. A use through a generic constraint lands on the interface's static abstract operator, not on the implementing type's. A record's compiler-synthesized `==` has no declaration and answers `not_found`. |
 | `Type.Type` | `constructor` | The type's construction and injection sites. This analyzer records no per-constructor fan-in, so overloads are unioned and a listed site may have called a different overload than you meant; `instantiation_sites` reports the same facts with the two edge kinds kept apart. `impact_of_change` does not resolve this form. |
 
 **Example**
@@ -53,12 +54,43 @@ The tools in this chapter answer four groups of questions:
 { "sessionId": "<session>", "symbol": "OrderService.Cancel" }
 ```
 
-**Response.** `symbol`, `resolvedKind`, an optional `note`, and `usedBy` - a capped envelope (`items`, `count`, `totalFound`, `truncated`, maximum 100). Depending on the answer, additional steering fields appear:
+**Response.** `symbol`, `resolvedKind`, an optional `note`, and `usedBy` - a capped envelope (`items`, `count`, `totalFound`, `truncated`, maximum 100). Each item is an object `{name, file, line}`:
 
-- `nearest` - the closest declared name, set when the query matched nothing (`resolvedKind: "not_found"`). A likely typo or case mismatch.
+- `name` - the user: a calling member under its full key with parameter types, a referencing type, or a markup view.
+- `file` - the file the user is declared in, relative to the solution and with forward slashes.
+- `line` - the line the user's declaration starts on in that file (its first attribute line when attributes precede it), not the line of the reference. A field, property or event whose initializer uses the symbol is placed by that member's declaration.
+
+A type declared in several files - a partial type, or same-named types the answer merges - lists them in `files` as `[{file, line}]` objects instead of `file` and `line`. Markup and top-level entries carry a `file` but no `line`, and an item that no recorded fact places carries neither: absent means unknown, never a guess. A script written for earlier releases, whose items were bare strings, reads `name`.
+
+```json
+{
+  "symbol": "OrderService.Cancel",
+  "resolvedKind": "method",
+  "usedBy": {
+    "items": [
+      {
+        "name": "MyApp.Web.OrdersController.Cancel(int)",
+        "file": "src/MyApp.Web/OrdersController.cs",
+        "line": 41
+      }
+    ],
+    "count": 1,
+    "totalFound": 1,
+    "truncated": false
+  }
+}
+```
+
+Depending on the answer, additional steering fields appear:
+
+- `nearest` - the closest declared name, set when the query matched nothing (`resolvedKind: "not_found"`). A likely typo or case mismatch; it can also be a declared name the query only begins, or - for a member asked on a type that does not declare it - the one type that does.
 - `collision` - set when a bare name resolved to a member while a same-named type also exists.
 - `namesakes` - set when the name resolved to a type that the solution declares several times. `usedBy` is then the union over all of them, and no entry says which one it uses.
+- `viaContract` and `viaContractNote` - set when a qualified method was credited the callers of the interface or abstract members it implements.
+- `selfReferences` - how many of the listed users of a member sit on its own type.
 - `textuallyInvisibleUsers`, `textualBindingKinds`, `textualBindingNote` - see below.
+
+**`not_found` is not "undeclared".** A delegate type and a qualified or nested type name (`Outer.Inner`) answer `not_found` too. Where the declarations can explain the miss, a `note` says why: a member asked on a type that does not declare it (the note names the types that do), or a declared type named by a qualified form, namespace-qualified or nested (the note names the simple name to ask for).
 
 **Empty answers.** A real kind with an empty `usedBy` means the symbol exists but no intra-solution reference was recorded. That is not proof of dead code, and the `note` that leads the answer names the ways a real use can escape the index and a cross-check you can run:
 
@@ -68,6 +100,7 @@ The tools in this chapter answer four groups of questions:
 - **Source-generated code:** generated documents are not walked, so a generator's output records no edge on what it calls.
 - **Enum members only:** values that arrive as strings or numbers (`Enum.Parse`/`TryParse`, JSON or database deserialization, a XAML attribute literal, a command-line argument) and attribute arguments on a type, property or field.
 - **Events only:** a subscription made through an interface lands on the interface's event, not the class's (the bare name unions both); a handler added by name (`WeakEventManager.AddHandler(src, nameof(E), ...)`, reflection `AddEventHandler`) or wired in markup leaves no edge.
+- **Operators only:** a `dynamic` operand, bound at run time; a call by name through reflection; the operator `true` or `false` behind a user-defined `&&` or `||`; the element operators of a tuple comparison `(a, b) == (c, d)`; and a conversion that a `foreach` applies to its elements, a compound assignment to its operand or result, or `??` to its right side.
 
 The cross-checks the note suggests: for a member, run the fan-in query on its declaring type (a type's fan-in is recorded where its member's is not); for a type, ask `instantiation_sites`, which reads different facts (construction and injection edges); for either, search the name in `.xaml`, `.csproj` or `.json`, or read the source.
 
@@ -98,20 +131,58 @@ The cross-checks the note suggests: for a member, run the fan-in query on its de
 | Parameter | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `sessionId` | string | yes | - | Session id, or an absolute `.sln` path for self-init. |
-| `symbol` | string | yes | - | The same strings `find_usages` accepts. A type takes its simple name only. |
+| `symbol` | string | yes | - | The same strings `find_usages` accepts - a user-defined operator by its metadata name included - except the constructor form `Type.Type`, which is not resolved here (use `find_usages`). A type takes its simple name only. |
 
-**Response.** `symbol`, `resolvedKind`, an optional `note`, `directCount`, `transitiveCount`, `risk`, `productionImpactCount`, `directImpact` (capped envelope, maximum 20 entries), the textual-binding fields described under `find_usages`, and `nearest` on an unresolved name.
+**Response.** `symbol`, `resolvedKind`, an optional `note`, `directCount`, `transitiveCount`, `risk`, `productionImpactCount`, `directImpact` (capped envelope, maximum 20 entries), the textual-binding fields described under `find_usages`, and `nearest` on an unresolved name. Where they apply: `saturation`, `viaContract` and `viaContractNote`, `implementers`, `riskBasis` and `collision`.
 
 | Field | Meaning |
 |---|---|
 | `directCount` | Number of symbols that reference the target directly. Includes test-project callers. |
 | `transitiveCount` | Number of symbols in the full transitive closure. Includes test-project callers. |
-| `productionImpactCount` | The non-test part of the transitive closure. This is the number the risk label is computed from. |
+| `productionImpactCount` | The non-test part of the transitive closure. |
 | `risk` | `none`, `low`, `medium` or `high`. |
+| `directImpact` | The direct users, as items `{name, file, line}` exactly as in `find_usages` (a type declared in several files lists `files` as `[{file, line}]`). |
+| `saturation` | Set where one dependency cycle dominates a high closure: it leads the counts, names the cycle, and risk is then graded by the direct production fan-in. |
+| `viaContract`, `viaContractNote` | A qualified method also counts the callers of the interface or abstract members it implements, as in `find_usages`. |
+| `implementers` | On an interface or abstract method or type: one entry per contract with `contract`, `count`, `testCount`, `typeCount`, `testTypeCount` and `members` - what a signature change breaks. See below. |
+| `riskBasis` | Set together with `implementers`: `closure`, `implementers`, `total` and an optional `note` - the number the risk was graded on. |
+| `collision` | A same-named symbol of another kind, not counted. |
 
-**How the risk level is calibrated.** The risk label is computed on the production fan-in only: test-project callers and implementers are excluded, because exercising a symbol from tests is its designed fan-in and updating those tests after the change is mechanical, not risk. The thresholds are `none` for 0, `low` below 5, `medium` up to and including 20, and `high` above 20. `productionImpactCount` discloses the number the label rests on.
+```json
+{
+  "symbol": "OrderService",
+  "resolvedKind": "type",
+  "directCount": 1,
+  "transitiveCount": 2,
+  "risk": "low",
+  "productionImpactCount": 2,
+  "directImpact": {
+    "items": [
+      {
+        "name": "CompositionRoot",
+        "file": "src/MyApp.Console/CompositionRoot.cs",
+        "line": 9
+      }
+    ],
+    "count": 1,
+    "totalFound": 1,
+    "truncated": false
+  }
+}
+```
 
-For a property, field, event or enum member there is no transitive member chain, so `transitiveCount` equals `directCount`.
+A script written for earlier releases, whose `directImpact` items were bare strings, reads `name`.
+
+**What is counted, per kind.** A type: the closure of the types that reference it. A method or an operator: its caller closure, following interface and abstract dispatch at every hop. A creation counts as a call to the constructor it binds, so for a method called from a constructor the closure reaches the code that builds the object, and its risk can rise. A property, field, event or enum member: the code that touches it - there is no transitive member chain, so `transitiveCount` equals `directCount`. A field or event initializer in a test class counts as test code, not as a production consumer.
+
+**How the risk level is calibrated.** The thresholds are `none` for 0, `low` from 1 to 4, `medium` from 5 to 20, and `high` above 20. They read `productionImpactCount`: test-project callers are excluded, because exercising a symbol from tests is its designed fan-in and updating those tests after the change is mechanical, not risk. Two cases read a different number:
+
+- With `saturation`, the bands read the direct production fan-in the block names, because a count that every symbol reaching the cycle shares measures the cycle, not the symbol.
+- With `implementers`, the bands read `riskBasis.total` = `riskBasis.closure` (the caller count above) + `riskBasis.implementers` (the production implementing types), because a signature change breaks both. On a method every production implementing type counts. On an interface or abstract class only the types that name it in their own base list count, and only those the closure does not already hold.
+
+The risk counts dependents, not what the change means.
+
+**Implementers.** An `implementers` entry for an interface or abstract **method** lists the implementing and overriding members; `typeCount` counts the types they sit on, which is what a change to one overload breaks. When the member name is declared by two same-named interfaces or abstract classes in different namespaces, the entry keeps their combined count and `namesakes` names each contract with its own implementing types. An entry for an interface or abstract **type** has one entry per declaration (namesakes in different namespaces and generic interfaces of different arity stay apart) and lists the implementing or deriving types, including those that implement the interface through a base class, as `find_implementations` lists them; the ones that reach it only through a base class are listed again under `indirect` and do not raise the risk. When no production code calls the interface or abstract member - or, for a type, no production type references it - `riskBasis.note` says that the risk comes only from its implementing types; the risk level itself is unchanged by the note. Where `saturation` grades the closure by its direct users, its note names the implementing types added to that count.
 
 **Notes.**
 
@@ -302,7 +373,7 @@ Each item carries `name`, `isAbstract`, `kind` (`class`, `struct`, `record` or `
 
 **Response.** The shared capped envelope (`items`, `count`, `totalFound`, `truncated`, maximum 100). Each entry pairs an overriding method with the nearest ancestor that declares the virtual or abstract method it overrides, rendered as `Derived.M(params) overrides Base`. Container and base render in their declaration form, for example `Strategy<T>.M(...) overrides ResilienceStrategy<TResult>`. When the overridden base is a framework virtual outside the solution, the entry reads `... overrides (external base)`. An empty list means no overrides of that name were found.
 
-**Notes.** Two same-named types that differ only by namespace, or that declare identical type-parameter names, render identically and collapse into a single row - the list carries no namespace. Treat a row as the relationship, not as one attributed type.
+**Notes.** Two same-named types that differ only by namespace, or that declare identical type-parameter names, render identically and collapse into a single row - the list carries no namespace. Treat a row as the relationship, not as one attributed type. Where a row stands for same-named types from different namespaces, `mergedNamesakes` follows the list and names each such row and its types. When the overriding type has the same simple name as its base, the row still names the base that declares the overridden member.
 
 **Example**
 
@@ -325,12 +396,13 @@ Each item carries `name`, `isAbstract`, `kind` (`class`, `struct`, `record` or `
 | `sessionId` | string | yes | - | Session id, or an absolute `.sln` path for self-init. |
 | `typeName` | string | yes | - | The type's exact (case-sensitive) simple name. Add an arity suffix - `Repository<T>` or `Repository`1` - to address a generic type unambiguously when a generic and a non-generic type share the name. Alias: `symbol`. |
 
-**Response.** `type`, `resolvedKind`, an optional `note` (the run-wide qualification), an optional `hint`, `mergedNamesakes`, `separatedNamesakes`, `baseChain`, `interfaces`, and `derivedTypes` (a capped envelope, maximum 100).
+**Response.** `type`, `resolvedKind`, an optional `note` (the run-wide qualification), an optional `hint`, `mergedNamesakes`, `separatedNamesakes`, `mergedArities`, `baseChain`, `interfaces`, and `derivedTypes` (a capped envelope, maximum 100).
 
-- `baseChain` lists the base-class chain upward, nearest base first. When the chain leaves the solution, the last entry names the external base, for example `ObservableObject (external)`.
+- `baseChain` lists the base-class chain upward, nearest base first. When the chain leaves the solution, the last entry names the external base, for example `ObservableObject (external)`. A base type outside the solution that only shares its simple name with a type inside it ends the chain as external.
 - `interfaces` lists the type's implemented interfaces; for an interface query these are its base interfaces.
 - `derivedTypes` lists transitively derived types; each entry reads `Derived : DirectBase`, so the subtree structure is preserved in the flat list.
-- Every link is rendered arity-qualified, so a same-name generic and non-generic type are distinguishable.
+- Every link is rendered arity-qualified, so a same-name generic and non-generic type are distinguishable. A link between two types of the same simple name - a type deriving from a same-named type in another namespace - is kept in both directions and written with full names, for example `Ef.User : Core.User`.
+- `mergedArities` is set when a bare name matches a generic type and its non-generic namesake: the view merges them, and the field says whose base chain is shown.
 - `resolvedKind: "not_found"` means no type of that name is in the solution.
 
 **Notes.**
@@ -400,28 +472,35 @@ Each item carries `name`, `isAbstract`, `kind` (`class`, `struct`, `record` or `
 | Parameter | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `sessionId` | string | yes | - | Session id, or an absolute `.sln` path for self-init. |
-| `symbol` | string | yes | - | A type name, or a member name either bare or in the qualified `Type.Member` form - the same strings `find_usages` and `impact_of_change` resolve. |
+| `symbol` | string | yes | - | A type name, or a member name either bare or in the qualified `Type.Member` form - the same strings `find_usages` and `impact_of_change` resolve, a user-defined operator by its metadata name (`op_Equality`) included - or `Type.Type` for the constructor. |
 
 **Which methods count as tests.** Only a method that itself carries a test attribute counts - an actual runnable test, not a fixture builder or helper that merely lives in a test project. The default attribute set is `Fact`, `Theory`, `Test`, `TestMethod` and `TestCase`, matched as a case-insensitive substring so that variants such as `WindowsFact` are recognized. The set is configurable through the solution's test profile.
 
-**Response.** The shared capped envelope (`items`, `count`, `totalFound`, `truncated`, maximum 50), plus `invokesTotal` and an optional `note`. Each item carries `testType`, `testMethod`, `project` and `matchReason`.
+**Response.** The shared capped envelope (`items`, `count`, `totalFound`, `truncated`, maximum 50), plus `invokesTotal`, `dispatchTotal` (omitted at 0) and an optional `note` after the list. Each item carries `testType`, `testMethod`, `project` and `matchReason`.
 
-**Match tiers.** `matchReason` names three tiers, ordered by how direct the evidence is:
+**Match tiers.** `matchReason` names one of nine tiers, in sort order:
 
 | Tier | Meaning |
 |---|---|
 | `invokes` | The test calls the target itself. |
-| `invokes-via` | The test reaches the target through one method it calls - still strong, but second-hand. |
-| `name` | The weak guess: the test's own name or its test class's name mentions the symbol at an identifier-segment boundary. A mid-word substring is not a mention. |
+| `invokes-via` | The test reaches the target through one method or constructor it calls - still strong, but second-hand. A test that builds an object reaches what that object's constructor calls. |
+| `accesses` | The test reads or writes the target property or field; for a type, a static one. |
+| `accesses-via` | The same, through one method or constructor the test calls. |
+| `constructs` | The test builds the target type (type and constructor queries only). |
+| `constructs-via` | The same, through one method or constructor the test calls. |
+| `dispatch` | The test calls an interface or abstract member the target implements; a test double may have run instead. |
+| `dispatch-via` | The same, through one method or constructor the test calls. |
+| `name` | The weak guess: the test's own name or its test class's name mentions the symbol at an identifier-segment boundary - for `Type.Member`, both names. A mid-word substring is not a mention. |
 
-The strong tier is limited to exactly two hops: the test itself and one method it calls, whether that is its own helper or a production entry point. A deeper chain (helper calling helper) or a table-driven sweep is not counted. `invokesTotal` counts both strong tiers over the whole result, not only the returned page. Direct hits sort ahead of helper hops, which sort ahead of name guesses, so the cap can only drop the least load-bearing end.
+The first six tiers are strong. The evidence reaches two hops at most: the test itself and one method or constructor it calls, or one property getter it reads. A deeper chain (helper calling helper) or a table-driven sweep is not counted, so an empty answer is not "nothing pins this". `invokesTotal` counts the strong rows and `dispatchTotal` the contract rows over the whole result, not only the returned page; `totalFound` minus both is the number of name guesses. Stronger evidence sorts first, so the cap can only drop the least load-bearing end.
 
-**Notes.** A `note` names four cases where the bare numbers mislead:
+**Notes.** The `note` says so on an empty answer, and names the other cases where the bare numbers mislead:
 
-- A qualified query whose type segment names no declared type. Matching is case-sensitive, so the strong tier silently collected nothing and every hit is weak name noise.
-- A query that names nothing declared at all. A full page of hits then describes the spelling, not this solution's coverage.
-- An empty answer on a symbol that does resolve. The note names the two-hop limit and the declaring type's own count, because a bare 0 otherwise reads as "nothing pins this".
-- A query that resolves to a declared property, field, event or enum member. Those declarations have no invocation edge in this query, so any returned hits are name matches.
+- A query that names nothing declared at all, or a qualified query whose type segment names no declared type. Matching is case-sensitive, so every hit is weak name noise - it describes the spelling, not this solution's coverage.
+- An event or an enum member. Only the name tier can match it.
+- A nested type in the `Outer.Inner` form.
+- A constructor query (`Type.Type`).
+- Contract rows (`dispatch`, `dispatch-via`), and construction rows, which are matched on the type's simple name, so a same-named type counts too.
 
 **Example**
 
@@ -444,7 +523,7 @@ The strong tier is limited to exactly two hops: the test itself and one method i
 | `sessionId` | string | yes | - | Session id, or an absolute `.sln` path for self-init. |
 | `scope` | string | no | `"solution"` | `"solution"` or a namespace prefix to narrow which symbols are checked. |
 
-**Response.** `scope`, an optional `note`, `symbolsScanned`, `uncovered` (a capped envelope, maximum 200), `verifiedAbsent` (a capped envelope, maximum 200), `transitivelyReached`, `judgedUnits`, `testProjectsExcluded` and `testFixtureTypesExcluded`.
+**Response.** `scope`, an optional `note`, `symbolsScanned`, `uncovered` (a capped envelope, maximum 200), `verifiedAbsent` (a capped envelope, maximum 200), `transitivelyReached`, `judgedUnits`, `testProjectsExcluded`, `testFixtureTypesExcluded` and `reachedOnlyThroughDispatch`.
 
 | Field | Meaning |
 |---|---|
@@ -453,15 +532,18 @@ The strong tier is limited to exactly two hops: the test itself and one method i
 | `symbolsScanned` | Every unit in scope, methods and types. |
 | `judgedUnits` | The non-test, non-abstract methods the uncovered list is drawn from - the population behind the gap count. |
 | `testProjectsExcluded` | The distinct test-classified projects whose units were excluded. |
-| `testFixtureTypesExcluded` | The distinct types excluded through the attribute-inferred fixture axis: a type that declares a test-attributed method is a test fixture, so its attribute-less `SetUp`/helper scaffolding is test code even when the project's name matches no test rule. |
+| `testFixtureTypesExcluded` | The distinct types excluded through the attribute-inferred fixture axis: a type that declares a test-attributed method is a test fixture, so its attribute-less `SetUp`/helper scaffolding is test code even when the project's name matches no test rule. Its constructors and its field and event initializers count as test code too. |
 
-**The one-hop definition.** The uncovered list is a one-hop index, not a coverage measurement. A method that a test reaches through another method - a CLI verb behind its command builder, a handler behind a dispatcher - is listed as uncovered although it is thoroughly exercised. Therefore read the per-entry `testReachDepth`: the hops to the nearest directly tested method, where 1 means a directly tested method calls it. Entries without that field are the ones no test reaches at all - work those first. A shallow depth is close to "already exercised" (confirm with `find_tests_for`); a deep one is more likely incidental.
+**The one-hop definition.** The uncovered list is a one-hop index, not a coverage measurement. A method that a test reaches through another method - a CLI verb behind its command builder - is listed as uncovered although it is thoroughly exercised. Therefore read the per-entry `testReachDepth`: the hops to the nearest directly tested method, where 1 means a directly tested method calls it. Entries without that field are the ones no test reaches at all - work those first. A shallow depth is close to "already exercised" (confirm with `find_tests_for`); a deep one is more likely incidental.
 
 The entries are marked rather than filtered out, because a deep transitive path is not the same claim as a test, and silently hiding a genuinely untested method would be the worse error for a tool whose job is negative knowledge.
 
 **Notes.**
 
 - A non-empty answer leads with a `note` carrying the split for that answer - how many of the listed methods are reached from a test through intermediate calls - and the same count is available as `transitivelyReached`. When no listed method is reached even indirectly, the note says so instead.
+- A constructor is a hop of the walk, never an entry of the list: `new X(...)` reaches the constructor overload it binds and what that constructor calls, so a method only a constructor calls gets a `testReachDepth`. The walk also follows an object that a field or property initializer creates: the code its constructor calls counts as reached when a test creates the containing object. A call from an accessor is not read.
+- The walk also follows interface and abstract dispatch; an entry reached only that way carries `viaDispatch`, and `reachedOnlyThroughDispatch` counts them.
+- A `scope` that matches no namespace answers `symbolsScanned: 0` with a `note` that says where to look instead: the namespace of a type the prefix names, the namespaces that contain the prefix as whole segments, or the closest namespace.
 - Abstract and interface method declarations are excluded: they have no body and are not coverable units.
 - A weak test-name match does not count as coverage here; it is too weak to prove anything.
 - Runtime coverage from a coverage tool remains the only measurement that sees reflection, generated and framework-invoked paths.
@@ -536,7 +618,7 @@ The entries are marked rather than filtered out, because a deep transitive path 
 | Verdict | Meaning |
 |---|---|
 | `confirmed` | The model supports the claim. For `no_tests` this means no covering test was detected. For `absent` the axis really is verified-absent. For `unknown` the axis really has no provenance entry. |
-| `refuted` | The model contradicts the claim. For `no_tests` this requires at least one strong covering test - one that invokes the symbol, directly or through one method it calls. For `absent` the axis has a provenance source other than verified-absent. |
+| `refuted` | The model contradicts the claim. For `no_tests` this requires at least one strong covering test, as `find_tests_for` defines its tiers. For `absent` the axis has a provenance source other than verified-absent. |
 | `indeterminate` | The model cannot decide. |
 
 **Notes.**
@@ -544,7 +626,7 @@ The entries are marked rather than filtered out, because a deep transitive path 
 - The tool is conservative in both directions: what the model cannot prove is `indeterminate`, never falsely confirmed - and never falsely refuted either.
 - Tests that merely carry the symbol in their name yield `indeterminate` with the invokes/name-only split disclosed in the reason, not a refutation; a test named after a symbol is not proof that it exercises it.
 - For a property, field, event or enum member, `no_tests` can only ever rest on name matches, because that member kind carries no invocation edge; the reason says so.
-- A name that resolves to nothing is reported as such - a statement about the name, not about the code.
+- A name that resolves to nothing is reported as such - a statement about the name, not about the code. A `no_tests` claim that names a declared type by its namespace-qualified name is not reported as undeclared: the reason names the type and asks for its simple name.
 - An axis name that is not recorded anywhere in the solution returns `indeterminate` with the actually recorded axes as evidence. A typo or an invented axis is never silently `confirmed`.
 
 **Example**

@@ -214,7 +214,7 @@ Flows:
 </METHOD_USED_BY_GRAPH>
 ```
 
-`ENTRY_POINTS` lists the entry methods with their parameter list. `ENTRY_POINT_FLOW` adds the direct first hop for each of them, in the form `Caller(params) -> Callee(param types)`. `METHOD_GRAPH` and `METHOD_USED_BY_GRAPH` list complete call edges; the method graph mode configured on the active detail preset decides how much of the signature each side carries. Outside its `Full` mode, calls within one type are omitted - the graph shows calls *between* types, so a chain that delegates internally first appears without that hop. `ENTRY_POINT_FLOW` deliberately keeps those first-hop edges.
+`ENTRY_POINTS` lists the entry methods with their parameter list. `ENTRY_POINT_FLOW` adds the direct first hop for each of them, in the form `Caller(params) -> Callee(param types)`. `METHOD_GRAPH` and `METHOD_USED_BY_GRAPH` list complete call edges; the method graph mode configured on the active detail preset decides how much of the signature each side carries. A constructor call is an edge like any other: `new OrderService(repo)` appears as `OrderService.OrderService(IRepository)`. A constructor of an external type is not listed, and a non-public constructor is filtered like a non-public method. Outside its `Full` mode, calls within one type are omitted - the graph shows calls *between* types, so a chain that delegates internally first appears without that hop. `ENTRY_POINT_FLOW` deliberately keeps those first-hop edges.
 
 An empty graph is rendered as a single `- none` line, so you can always tell "the section was rendered and is empty" from "the section is not in the document".
 
@@ -434,6 +434,15 @@ UnknownDependencies:
 
 `[high]` marks a strong, architecture-relevant relation - typically a direct implementation, a constructor dependency or a central operational dependency. `[medium]` marks a relevant but less central relation, typically recurring usage. `[low]` marks a weak or data-oriented relation - typically DTO, model or enum usage, a contract-only transfer or an uncertain fallback. The markers are relative heuristics for the reader, not formal proof levels.
 
+**Which member types the lists name.** The type of a property, a field and an event enters the type's dependency lists in the same way:
+
+- Fields count at any accessibility, `static`, `readonly` or `const`; an enum constant names its enum. Compiler-generated backing fields are not counted.
+- Events count in either form (field-like or with `add`/`remove` accessors), at any accessibility, `static`, in an interface or as an explicit interface implementation. The delegate type is listed unless its namespace is excluded; its type arguments and tuple elements are listed either way (`EventHandler<OrderPlacedArgs>` lists `OrderPlacedArgs`).
+- For an array, a nullable, a generic argument or a tuple, the element type is listed.
+- Keyword types are not listed: keywords such as `int` and `string`, and also `char`, `sbyte`, `ushort`, `uint`, `ulong`, `nint` and `nuint`; arrays of keyword types (`string[]`, `char[]`); nullable keywords (`int?`); and `dynamic`. An array is judged by its element, so a solution's own `Foo[]` stays. A type of the solution spelled like a keyword (a class `Char` or `Dynamic`) is listed as itself, and its `USED_BY` does not name the types that merely use the keyword, for example inside `List<char>`.
+
+The referenced type's `USED_BY` names the declaring type in turn.
+
 Note: `DEPENDENCIES` and `METHODS` are written for classes and interfaces even when they end up empty; the other sub-blocks are omitted when they have no content.
 
 ### METHODS
@@ -483,7 +492,7 @@ It contains the signature, the return type (or `void`), the accessibility (or `p
 
 The mode of a method is the result of several rules. A method is written compact only when its detail level is not `Full`, it does not belong to the primary or near flow, it is private, and it has no documentation summary, no AI annotations, no callers and no dependencies. Per-node overrides and the auto-compression heuristic can move any method into compact or detailed rendering.
 
-`METHOD_INFO` inside a full method block contains the objective method facts: `Name`, `Signature`, `Return`, `Access`, `Modifiers`, `ReturnKind`, `Parameters`, and the flags `IsStatic`, `IsAsync`, `IsExtension`, `ThrowsDetected`, `UsesLinq` and `UsesReflection` (each written only when true). A method block additionally carries `DEPENDENCIES` with a `Types:` list and a `Calls:` list of the methods it invokes in the solution, and a `USED_BY` list of its callers.
+`METHOD_INFO` inside a full method block contains the objective method facts: `Name`, `Signature`, `Return`, `Access`, `Modifiers`, `ReturnKind`, `Parameters`, and the flags `IsStatic`, `IsAsync`, `IsExtension`, `ThrowsDetected`, `UsesLinq` and `UsesReflection` (each written only when true). A method block additionally carries `DEPENDENCIES` with a `Types:` list and a `Calls:` list of the methods it invokes in the solution, and a `USED_BY` list of its callers. The `Types:` list follows the rule of the type-level lists (see `DEPENDENCIES`): no keyword types, keyword arrays, nullable keywords or `dynamic`, while a solution's own type spelled like a keyword stays. A type used only as an element of a tuple inside a generic type (`new Box<(Order, int)>()`, `Action<(string, Change<int>)>`) is named there, and `find_usages` names the method as its user; a field typed as an array of tuples (`(Order, int)[]`) likewise counts the tuple's element types as used. The `Calls:` list includes the constructors the method calls: `new OrderService(repo)` appears as `OrderService.OrderService(IRepository)`. A constructor of an external type is not listed, and a non-public constructor is filtered like a non-public method.
 
 ## 5.12 The legends
 

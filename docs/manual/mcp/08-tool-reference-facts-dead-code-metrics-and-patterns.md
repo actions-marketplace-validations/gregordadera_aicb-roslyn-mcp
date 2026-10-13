@@ -63,7 +63,7 @@ The eight effect tokens:
 
 **Notes.**
 
-- Effects are propagated transitively: a method that calls a project method which hits the database counts as `database`.
+- Effects are propagated transitively, along calls and creations: a method that calls a project method which hits the database counts as `database`, and so does a method that builds an object whose constructor hits the database. A constructor that chains to such a constructor with `: this(...)` or `: base(...)` carries the effect too. A hit does not say which of its effects are direct and which inherited.
 - With neither `effect` nor `purity`, only impure methods are listed - a bare "all methods" dump has no value.
 - The scan set is every method plus every property, indexer and event accessor and every constructor with a body, each as a unit of its own under its metadata name (`get_X`, `set_X`, `.ctor`, `.cctor`). A field or property initializer counts toward the constructor the compiler runs it in. The `purity="pure"` list stays methods-only, because a bodied getter is pure by default and would drown it.
 - On zero matches, `availableEffects` lists the tokens this scope actually records. An empty `availableEffects` means nothing was recorded in a scope that was scanned; the field is omitted when `methodsScanned` is `0`, and the note then says that nothing was scanned at all.
@@ -84,7 +84,7 @@ Finds the production methods that call an external (non-solution: BCL or third-p
 | `scope` | string | no | `solution` | `solution` or a namespace prefix. |
 | `includeTests` | boolean | no | `false` | Include test-project methods. |
 
-**Response.** `scope`, `note`, `pattern`, `methodsScanned`, `matches` and `testMatchesFiltered`. Each hit reports the two kinds apart: `matchedCalls` for invocations and `matchedReads` for external property reads. An invocation executes, while a read only observes ambient state, and an AOT, testability or security verdict differs per kind.
+**Response.** `scope`, `note`, `pattern`, `methodsScanned`, `matches` and `testMatchesFiltered`. A hit carries `project` only where two projects compile the same type, so two such rows stay apart. Each hit reports the two kinds apart: `matchedCalls` for invocations and `matchedReads` for external property reads. An invocation executes, while a read only observes ambient state, and an AOT, testability or security verdict differs per kind.
 
 **Notes.**
 
@@ -349,7 +349,7 @@ Finds production-dead symbols - public or internal types and methods that are us
 - The predicate is: direct callers exist, and the production impact is zero - the same production fan-in that `impact_of_change` reports. The test callers prove that the symbol is real and reachable rather than reflection-only noise; the production zero flags it as unwired.
 - Methods are judged over their dispatch family: the method itself plus the same-named members of its declaring type's ancestry (base chain and interfaces, transitively). A call bound to `IFoo.Bar` records its edge on `IFoo.Bar`, so an interface member's production callers are seen and a concrete implementation is not a false positive, while a same-named method on an unrelated type neither lends evidence nor suppresses it. Where an interface has several implementers, the count can include tests that ran against a different one.
 - Dispatch and framework escapes are exempt: virtual, override and abstract members; well-known interface members such as `Dispose` or `Equals`; `On*` event handlers; `[RelayCommand]` and serialization-callback attributes; and whole XAML, test-scaffolding and framework-host types. Types use the same exemption taxonomy as `find_dead_code`.
-- Test-project symbols are the callers that matter here, never candidates themselves: a test method is not production-dead.
+- Test-project symbols are the callers that matter here, never candidates themselves: a test method is not production-dead. A field initializer in a test class counts as test code, not as a production consumer.
 - `candidatesWithoutAnyCaller` counts public or internal methods dropped because they have no caller anywhere in their dispatch family. Nothing proves them real, so they are not production-dead - but `find_dead_code` will not show them either, because its method axis is private-only. This number is the only sign that this class exists.
 - The tool errs toward under-reporting: a symbol reached only via reflection, dependency injection or a source generator that static analysis cannot see is exempt. What a flag establishes with high confidence is the test usage; the production zero beside it is recorded, not proven, and the answer's own note says so. An empty result is not proof either.
 - An empty answer is qualified only when it was structurally guaranteed: a scope that matched nothing says so instead of posing as clean, and a scope where no scanned unit was eligible reports "not judged here" with the ineligible counts.
@@ -393,13 +393,13 @@ Queries per-method complexity directly, or ranks the complexity hotspots. Both m
 | `includeTests` | boolean | no | `false` | When ranking: include test-project methods. Ignored in the by-name lookup. |
 | `rankByCognitive` | boolean | no | `false` | When ranking: sort and filter by cognitive complexity instead of cyclomatic complexity. Both numbers are always present per method; this only changes the axis. Ignored in the by-name lookup. |
 
-**Response.** `scope`, `mode` (`symbol` or `ranked`), `note`, `minComplexity`, `minComplexityBoundary`, `methodsScanned`, `methods`, `nearest` and `testMethodsFiltered`. Each method entry carries `name`, `declaringType`, `namespace`, `cyclomaticComplexity`, `cognitiveComplexity` and `parameterCount`. Capped at 200 - the top entries when ranking.
+**Response.** `scope`, `mode` (`symbol` or `ranked`), `note`, `minComplexity`, `minComplexityBoundary`, `methodsScanned`, `methods`, `nearest` and `testMethodsFiltered`. Each method entry carries `name`, `declaringType`, `namespace`, `cyclomaticComplexity`, `cognitiveComplexity` and `parameterCount`, plus `project` where two projects compile the same type. Capped at 200 - the top entries when ranking.
 
 **Notes.**
 
 - The complexity floor is inclusive: a method whose ranking complexity is exactly `minComplexity` is listed, and a filtered answer states that in `minComplexityBoundary`. `solution_metrics` counts methods over its threshold strictly, so at the same number its count is smaller by exactly these boundary methods.
 - The by-name lookup is never filtered by tests or by the floor, and it also resolves a user-defined operator, an accessor or a constructor by its metadata name (`op_Equality`, `get_Items`, `.ctor` - the last unions every constructor in the solution). The ranked hotspot view stays methods-only.
-- A by-name lookup that matches no method carries a `nearest` suggestion, the closest declared name. If the exact name resolves to a declared type rather than a method, the note says so and points to `find_symbol` or `symbol_signature`. An empty ranking never steers: nothing above the complexity floor is a measurement, not a typo.
+- A by-name lookup that matches no method carries a `nearest` suggestion, the closest declared name. If the exact name resolves to a declared type rather than a method, the note says so and points to `find_symbol` or `symbol_signature`. An empty ranking never steers: nothing above the complexity floor is a measurement, not a typo. The other way to an empty ranking is a `scope` that matches no namespace: `methodsScanned` is then `0`, and a `note` says where to look instead (the namespace of a type the prefix names, the namespaces that contain the prefix, or the closest namespace).
 - `testMethodsFiltered` counts the test-project methods the filter removed; it is counted over the removed population, which `methodsScanned` does not include, so it can exceed that number. When the strongest filtered method would have landed inside the shown ranks, a note names it and the rank it would hold - a count alone cannot tell you whether the missing entries sat at the bottom or at the top.
 - When the two complexity axes would deliver different sets of methods, a leading note names the axis that ordered this list and the methods the other axis would have shown. The note stays silent when they agree.
 - Works on a recalled session. A session recorded before cognitive complexity existed reports `0` for it.
@@ -431,6 +431,7 @@ Returns the solution-wide quality rollup in one call - the same numbers that the
 - The scope is production code only, matching the CLI gate: test projects are excluded from every number. The response says so itself with `scope: "production"`, and `testMethodCount` and `testTypeCount` carry the excluded test-side tallies in the same units - `methodCount` plus `testMethodCount` is the full solution's method-unit count.
 - The rollup is deliberately not triage-filtered: insight suppressions apply to the reading surfaces (`list_insights` and `get_insight`), while this rollup and the CLI gate keep counting every finding. On a triaged solution these severity counts are therefore higher than what `list_insights` returns, and that gap is the suppression set.
 - Works on a recalled session. The line-based debt and long-method producers degrade the same way as the CLI gate on a recalled snapshot; the metric rollup itself is stable.
+- The tool writes nothing of its own; an older database passed as `dbPath` is upgraded on open, as the server upgrades its own at startup.
 
 ### `detect_circular_dependencies`
 
@@ -491,11 +492,12 @@ Given a set of symbols that should follow the same pattern - for example all you
 | Parameter | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `sessionId` | string | yes | - | The session id or a solution path. |
-| `symbols` | array of strings | yes | - | The type or method names that should share a pattern. Two are the minimum, three or more give a real consensus. Unknown names are reported, never silently dropped. |
+| `symbols` | array of strings | yes | - | The type or method names that should share a pattern. Two are the minimum, three or more give a real consensus. Unknown names are reported, never silently dropped. A name several declarations share is measured as the first of them; a qualified name (`Type.Member`, `Ns.Type.Member`, `Ns.Type`) picks one type, but not one overload. |
 
-**Response.** `consensusKind`, `memberCount`, `conformingCount`, `consensusScalars`, `consensusSets`, `deviations` and `noConsensusScalars`.
+**Response.** `consensusKind`, an optional `note`, `memberCount`, `conformingCount`, `consensusScalars`, `consensusSets`, `deviations` and `noConsensusScalars`.
 
 - `consensusKind` is the majority kind (`type` or `method`), or `not_found` when none of the names resolved.
+- `note` stands ahead of `memberCount`, the number it qualifies: it names repeated names (counted once) and names several declarations share (measured as the first only).
 - `consensusScalars` and `consensusSets` are the published consensus shape: scalar dimensions with their shared value, set dimensions with their shared elements.
 - `deviations` lists the members that differ from the consensus; each entry carries the `member`, its `resolvedKind` and the `deviations` as human-readable dimension lines. A member of the minority kind is flagged as a kind deviation, and an unresolved name is reported with `not_found`.
 - `noConsensusScalars` lists scalar dimensions that were deliberately left out because no single value reached a majority, each with its observed distribution.

@@ -89,7 +89,7 @@ A **fact** is a measured property of a symbol, derived deterministically from th
 | Cognitive complexity | How hard the body is to understand (nesting, `else`/`catch`, runs of boolean operators). `0` = linear or without a body and is a valid score, not a sentinel. |
 | Lines of code | The lines of the declaration that carry at least one token - signature, attributes and body. Blank lines and comment-only lines are not counted; a line with code and a trailing comment is; a token that spans several lines counts each of them. This is deliberately not the raw line span, because that number grows with every comment and the best-documented method would read as the longest one. `0` = not computed. |
 | Side effects | The outside-world contact of the body; see below. |
-| Called project methods | The solution methods the body invokes. |
+| Called project methods | The solution methods the body invokes. A creation (`new X(...)`) counts as a call to the solution constructor it binds. |
 | Used types | The types the body names. |
 | Injected dependencies used | Which constructor-injected dependencies the body actually uses. |
 | Created types | The types the body instantiates with `new` (including target-typed `new`). |
@@ -113,7 +113,7 @@ The vocabulary of side effects is closed and has eight values:
 | `messaging` | Message-bus and queue clients (for example MassTransit, RabbitMQ, Azure Service Bus, Kafka, NATS, MediatR, Amazon SQS/SNS). |
 | `unknown` | An external call that no classification rule matched - an unanalyzable third-party member, reported so the gap is visible instead of reading as pure. |
 
-Effects include the transitive ones: a method that calls a project method which hits the database is a database method itself. The classification judges by **contact, not by topic** - `Path` and `MemoryStream` carry no `io` effect, `File` and `FileStream` do.
+Effects include the transitive ones, along calls and creations: a method that calls a project method which hits the database is a database method itself, and so is a method that builds an object whose constructor hits the database. The classification judges by **contact, not by topic** - `Path` and `MemoryStream` carry no `io` effect, `File` and `FileStream` do.
 
 You meet the resolved side-effect classification in `find_by_side_effects` (which can also list only pure methods with `purity: pure` or only impure ones with `purity: impure`) and in the quality-profile option `Side-effect concentration (methods mixing 3+ effect categories)`. A context document does not render that resolved classification in `SEMANTICS`: an explicit `<ai>` annotation can appear as `SideEffects` in `AI_TAGS`, and a provenance line can state `verified-absent: sideEffects`.
 
@@ -191,7 +191,9 @@ The analysis records the relationships between symbols as **edges**. These are t
 | Edge | Direction | Where you meet it |
 |---|---|---|
 | calls | method → method | `call_graph`, `METHOD_GRAPH` |
+| creates | method -> the solution constructor a `new X(...)` binds | `METHOD_GRAPH`, a method's `Calls:` list, `impact_of_change`, `find_tests_for`, `coverage_gaps` |
 | called by (fan-in) | method → callers | `find_usages`, `impact_of_change`, `METHOD_USED_BY_GRAPH` |
+| operator use | unit -> user-defined operator or conversion (`a == b`, a cast, an implicit conversion) | `find_usages`, `impact_of_change`, `find_tests_for` |
 | depends on | type → type | `CLASS_DEPENDENCY_GRAPH`, the efferent-coupling metric (`Ce`) |
 | implements | type → interface | `find_implementations`, `INTERFACE_RELATIONS` |
 | inherits / overrides | type → base type | `get_type_hierarchy`, `find_overrides` |
@@ -203,7 +205,7 @@ The analysis records the relationships between symbols as **edges**. These are t
 
 "Markup" covers WPF `.xaml`, Avalonia `.axaml` and Blazor `.razor` files.
 
-The type dependency list is the union of the injection dependencies and the usage dependencies of a type, deduplicated, sorted and with self-references removed.
+The type dependency list is the union of the injection dependencies and the usage dependencies of a type, deduplicated, sorted and with self-references removed. Which member types it names is described under `DEPENDENCIES` in the chapter on the context document.
 
 Note: the type dependency list is built from short type names, so two types with the same simple name in different namespaces are not distinguished there; where a collision occurs, the first one in the stable solution order wins. The circular-dependency check works on fully-qualified names and is not affected.
 
@@ -213,7 +215,9 @@ Note: the type dependency list is built from short type names, so two types with
 
 **Impact** is the transitive closure of the fan-in: everything that would be affected indirectly by a change to the symbol, including consumers that a compiler does not check.
 
-`find_usages` lists the direct mentions, one level. `impact_of_change` returns the closure together with a `risk` level. The risk is calibrated on the production fan-in; callers in test projects are excluded, because exercising a symbol from tests is its designed fan-in and updating those tests is mechanical.
+`find_usages` lists the direct mentions, one level, each with the file and the line its declaration starts on. `impact_of_change` returns the closure together with a `risk` level. The risk is calibrated on the production fan-in; callers in test projects are excluded, because exercising a symbol from tests is its designed fan-in and updating those tests is mechanical. On an interface or abstract member or type, the production types that implement it count toward the risk as well, because a signature change breaks them too.
+
+User-defined operators and conversions have a fan-in of their own: `a == b`, a cast and an implicit conversion are uses of the declared operator. The fan-in tools take an operator by its metadata name, such as `op_Equality` or the qualified `Money.op_Implicit`.
 
 Note: the `risk` level measures the fan-in, not the semantics of your concrete change. A `high` on a purely additive change is expected and is not a stop signal.
 

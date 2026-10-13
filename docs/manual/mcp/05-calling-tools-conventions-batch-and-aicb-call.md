@@ -270,7 +270,7 @@ Many list answers come as `{ items, count, totalFound, truncated }`. `count` is 
 
 ### `nearest`
 
-When a name resolves to nothing, many tools add a `nearest` suggestion - the closest declared name - instead of returning a bare empty list. That distinguishes "you misspelled it" from "this symbol really has no matches". It is present on `find_symbol`, `symbol_signature`, `find_usages`, `impact_of_change`, `symbol_metrics`, `instantiation_sites` and `resolve_injection`, and as a `hint` on `get_type_hierarchy` and `find_implementations`.
+When a name resolves to nothing, many tools add a `nearest` suggestion - the closest declared name, or a declared name the query only begins - instead of returning a bare empty list. That distinguishes "you misspelled it" from "this symbol really has no matches". It is present on `find_symbol`, `symbol_signature`, `find_usages`, `impact_of_change`, `symbol_metrics`, `instantiation_sites` and `resolve_injection`, and as a `hint` on `get_type_hierarchy` and `find_implementations`.
 
 ### `note`
 

@@ -176,7 +176,7 @@ The analysis classifies every method by what it touches in the outside world. Th
 - A `System.Net` type is judged the same way. Addresses (`IPAddress`/`IPEndPoint`/`DnsEndPoint`), cookie and header containers, credential holders, the HTTP and mail *message* surfaces and all of `System.Net.Mime` carry no effect; `Dns`, `Sockets`, `WebClient`, `SmtpClient`, `HttpClient`, `HttpContent` and third-party clients (Flurl.Http, Azure Blob Storage, Amazon S3/SES) do.
 - A cache a type holds **in memory** is not an outside-world effect and is never classified as `cache`. Find such types through their cache interface (`find_implementations`) or their name (`find_symbol`).
 
-**Effects propagate.** A method that calls a method with `io` carries `io`. Propagation follows the call graph upward, including a call through an interface when exactly one implementation exists; a call with several possible implementations stays unresolved. Because of this, a single misclassified external call would fan out over the entire caller tree - which is why the classifier is conservative about the types listed above.
+**Effects propagate.** A method that calls a method with `io` carries `io`, and so does a method that builds an object whose constructor has `io`. Propagation follows calls and creations upward, including a call through an interface when exactly one implementation exists; a call with several possible implementations stays unresolved. A constructor that chains to another with `: this(...)` or `: base(...)` carries that constructor's effects, and a field initializer counts toward the constructor that runs it. Because of this, a single misclassified external call would fan out over the entire caller tree - which is why the classifier is conservative about the types listed above.
 
 > **Note:** effect, leak and external-call results require a restored/built solution. In an unbuilt tree they can be empty or incomplete without looking wrong.
 
@@ -300,25 +300,31 @@ A multi-targeted instance is matched on its logical name too, so a suffix such a
 
 Attribute names are matched as substrings, case-insensitive, so a custom `[WindowsFact]` matches via `Fact`.
 
-**Match tiers.** `find_tests_for` reports each covering test with the strength of the evidence:
+**Match tiers.** `find_tests_for` reports each covering test with the strength of the evidence, in nine tiers. They are listed here in sort order:
 
-| Tier | Value | Meaning | Rank |
-|---|---|---|---|
-| Direct | `invokes` | The test calls the target itself - one hop, the strongest evidence | 0 |
-| Via helper | `invokes-via` | The test reaches the target through one method it calls (its own helper or a production entry point) - two hops, still strong | 1 |
-| Name | `name` | The test's or its class's name mentions the target - a guess, not evidence of a call | 2 |
+| Value | Meaning |
+|---|---|
+| `invokes` | The test calls the target itself - the strongest evidence. |
+| `invokes-via` | The test reaches the target through one method or constructor it calls (its own helper, a production entry point, or an object it builds). |
+| `accesses` | The test reads or writes the target property or field; for a type, a static one. |
+| `accesses-via` | The same, one hop away. |
+| `constructs` | The test builds the target type (type and constructor queries only). |
+| `constructs-via` | The same, one hop away. |
+| `dispatch` | The test calls an interface or abstract member the target implements - a test double may have run instead. |
+| `dispatch-via` | The same, one hop away. |
+| `name` | The test's or its class's name mentions the target - a guess, not evidence of a call. |
 
-"Strong" means `invokes` or `invokes-via`. `invokesTotal` counts both strong tiers. The result is ordered direct first, then helper hop, then name guess, and within a tier alphabetically - so the 50-entry cap can only ever drop the least load-bearing end.
+The first six tiers are "strong". The evidence reaches two hops at most: the test and one method or constructor it calls, or one property getter it reads. `invokesTotal` counts the strong rows and `dispatchTotal` the contract rows; the rest are name guesses. Stronger evidence sorts first, so the 50-entry cap can only ever drop the least load-bearing end.
 
 Three query targets can all produce the same empty list, and the answer distinguishes them:
 
 - **Not declared** - no declared type and no declared member carries the name. An empty answer then says nothing about coverage.
-- **Type or method** - what the strong tier can index.
-- **Member outside the index** - a property, field, event or enum member: resolvable for `find_usages` and `impact_of_change`, but without a call edge, so only the name tier can fire.
+- **Type, method, operator, property or field** - what the strong tiers can index (properties and fields through the `accesses` tiers).
+- **Event or enum member** - resolvable for `find_usages` and `impact_of_change`, but only the name tier can match it.
 
-**Coverage gaps.** `coverage_gaps` lists production code without strong test coverage, per scope, capped at 200 entries. It is a **one-hop list, not a coverage measurement**: a method that a test reaches through another method is still listed. Each entry therefore carries `testReachDepth` - the number of hops to the nearest directly tested method. An entry *without* a depth is one no test reaches at all; those are the real gaps to work first.
+**Coverage gaps.** `coverage_gaps` lists production code without strong test coverage, per scope, capped at 200 entries. It is a **one-hop list, not a coverage measurement**: a method that a test reaches through another method is still listed. Each entry therefore carries `testReachDepth` - the number of hops to the nearest directly tested method. An entry *without* a depth is one no test reaches at all; those are the real gaps to work first. A constructor is a hop of that walk: `new X(...)` reaches the constructor it binds and what that constructor calls, so a method only a constructor calls gets a depth too.
 
-The population is disclosed, so a gap count can be read against its denominator: `judgedUnits` (the non-test, non-abstract methods the list is drawn from) out of `symbolsScanned`, plus `testProjectsExcluded` and `testFixtureTypesExcluded`. Abstract declarations (interface methods without a default implementation, abstract class methods) are excluded - a test covers the implementation, not the declaration. A type that declares a test-attributed method is treated as a test fixture, so its attribute-less `SetUp`, lifecycle and helper members count as test code, not as uncovered production code; this also works for a fixture in a project whose name matches no test rule.
+The population is disclosed, so a gap count can be read against its denominator: `judgedUnits` (the non-test, non-abstract methods the list is drawn from) out of `symbolsScanned`, plus `testProjectsExcluded` and `testFixtureTypesExcluded`. Abstract declarations (interface methods without a default implementation, abstract class methods) are excluded - a test covers the implementation, not the declaration. A type that declares a test-attributed method is treated as a test fixture, so its attribute-less `SetUp`, lifecycle and helper members - its constructors and its field and event initializers included - count as test code, not as uncovered production code; this also works for a fixture in a project whose name matches no test rule.
 
 > **Note:** the absence of a detected test is not proof that no test exists. The list is built from statically resolved calls.
 

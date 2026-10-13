@@ -41,7 +41,7 @@ The MCP tools `save_session` and `compare_with_previous` do the same from an age
 
 What a comparison does **not** do: it is name-based and syntactic. It reports types and method signatures; it does not diff method bodies, so it cannot tell you which lines inside a method changed.
 
-Note: snapshots lose their line numbers when they go through the database. A comparison against a saved snapshot therefore has no line references. This is also stated in the description of the `save_session` tool.
+Note: a snapshot keeps the line spans of the analysis it was taken from, but an MCP session recalled from it reports `lineNumbersAvailable: false`: its lines describe the code as analyzed, not the current working tree. This is also stated in the description of the `save_session` tool.
 
 A snapshot records the format it was written in. If a snapshot cannot be read back - an older or damaged payload - it is treated as unusable and the solution is analyzed again instead of returning a half-read result.
 
