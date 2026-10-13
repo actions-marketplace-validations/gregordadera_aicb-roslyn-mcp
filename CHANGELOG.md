@@ -4,6 +4,138 @@ Versions follow `Major.Minor.Series.Build`. The build number rises by one for ev
 change that lands, so gaps between published versions are normal - not every build is
 released.
 
+## 0.5.502.1 (unreleased) - Usage answers name the file and line of every user, operators count as uses, and impact_of_change weighs what implements a contract
+
+**Who is affected.** Everyone on the MCP server: reconnect your client once - 16 tools of the
+default profile have a new description; no tool or parameter was added, removed or made
+required. **Scripts that read `find_usages` or `impact_of_change` items as strings: read
+`name`** - every item of `usedBy` and of `directImpact` is now an object `{name, file, line}`.
+Exported documents change in their dependency lists and call lists (below). A snapshot, saved
+session or remembered codebase from an earlier version is analyzed afresh the first time it is
+used. The configuration database is not changed.
+
+### Where every user is: file and line
+
+- **`find_usages` names the file and line of every user.** Each `usedBy` item is now an object
+  `{name, file, line}` instead of a bare string: `name` is the entry as before, `file` the file
+  the user is declared in, relative to the solution and with forward slashes, and `line` the line
+  its declaration starts on (the first attribute line when attributes precede it) - not the line
+  of the reference. A type declared in several files lists them in `files` as `[{file, line}]`;
+  an entry whose file is not known carries neither. **Breaking for a script that reads the items
+  as strings: read `name`.**
+- **`impact_of_change`'s `directImpact` items have the same shape** `{name, file, line}`, built
+  by the same rule.
+- Fields, properties and events carry the line their declaration starts on too, so a user that
+  is a field or property initializer is placed by its member's declaration. Markup entries and
+  top-level statements carry no line.
+- **`symbol_signature` reports `line` for properties, fields and events**; it is null for an
+  enum member and a source-generated property.
+
+### Operators and conversions count as uses
+
+- **A user-defined operator or conversion is now fan-in:** `a == b`, `a + b`, a cast and an
+  implicit conversion are uses of the operator they call. `find_usages`, `impact_of_change` and
+  `find_tests_for` resolve an operator by its metadata name, bare or qualified (`op_Equality`,
+  `Money.op_Implicit`), with `resolvedKind` `operator`; `impact_of_change` follows its users like
+  a method's callers. Before, operators had no fan-in.
+- A record's compiler-generated `==` has no declaration and still answers `not_found`; the note
+  names the operators the type does declare. When an operator has no recorded use, the note names
+  the forms that leave none.
+- `find_symbol`'s description no longer says operators have no fan-in.
+
+### `impact_of_change` and contracts
+
+- **On an interface or abstract method, `impact_of_change` lists what implements or overrides
+  it** in `implementers` (per contract member: `count`, `testCount`, `typeCount`, `testTypeCount`,
+  `members`) - what a signature change breaks - and **`risk` counts them**: it reads
+  `riskBasis.total`, the production caller closure plus the production types that implement the
+  member. The bands (0 none, 1-4 low, 5-20 medium, above 20 high) are unchanged, and
+  `productionImpactCount` keeps its meaning.
+- **On an interface or abstract class, `implementers` lists the implementing or deriving types**,
+  one entry per declaration. The risk counts only the types that name the contract in their own
+  base list; types that inherit it through a base class are listed under `indirect`.
+- When two same-named interfaces or abstract classes in different namespaces declare the member,
+  one entry carries their combined count and `namesakes` names each contract with its own
+  implementing types. When no production code calls the contract, `riskBasis.note` says the risk
+  comes only from its implementing types, and **`review_context`** puts the same sentence into
+  the row's `note`.
+- Where a dependency cycle makes the risk read the direct users, the `saturation` note names the
+  implementing types added to that count.
+- A generic outer type, or another type nested in it, is no longer listed as an implementer when
+  only a nested type implements the interface (also in `find_implementations`).
+
+### Constructors
+
+- **Building an object reaches its constructor:** `new X(...)` is a call to the constructor it
+  binds. `find_tests_for` lists a test that reaches a method through a constructor as
+  `invokes-via`, `coverage_gaps` follows constructors (and the objects a field or property
+  initializer creates), and `impact_of_change` follows a constructor to the code that constructs
+  the type, so its transitive count and risk can rise.
+- **Side effects travel through constructors:** a method that builds an object whose constructor
+  writes a file, calls the network or logs carries that effect too, transitively, also through
+  `: this(...)` and `: base(...)`. `find_by_side_effects` lists such methods; a field initializer
+  counts toward the constructor that runs it.
+- A test class's constructor, field initializers and event initializers count as test code, not
+  as a production consumer, in `impact_of_change`, `coverage_gaps` and `find_production_dead`.
+- A constructor and a method whose names differ only in letter case no longer share their side
+  effects.
+
+### Exported documents
+
+- **A method's constructor calls are listed with its other calls:** `new OrderService(repo)`
+  appears as `OrderService.OrderService(IRepository)` in the method graph, the used-by graph and
+  the method's Calls list. External and non-public constructors are not listed.
+- **Field and event types join the dependency lists** where a property's type of the same shape
+  already did - fields of any accessibility, static, readonly or const (an enum constant names
+  the enum), events of either form, including the element of an array, a nullable, a generic
+  argument or a tuple; the referenced type's used-by list names the declaring type in turn.
+- **A tuple element counts as used** inside a generic type (`Box<(Order, int)>`) and in an array
+  of tuples, so such a type is no longer reported as unused.
+- **Keyword types are no dependency entries:** `char`, `sbyte`, `ushort`, `uint`, `ulong`,
+  `nint` and `nuint` join `int` and `string`, and so do keyword arrays (`string[]`), nullable
+  keywords (`int?`) and `dynamic` - in the type-level lists and in a method's
+  `<DEPENDENCIES> Types:` list. An array is judged by its element, so your own `Foo[]` stays, and
+  a type you declare with a keyword-like name (`Char`, `Dynamic`) is listed instead of being
+  hidden behind the keyword.
+
+### Same-named types
+
+- `get_type_hierarchy` keeps the inheritance between two types of the same simple name in
+  different namespaces and writes that link with full names; a base type outside the solution
+  that only shares a name with one inside ends the chain as external. With a bare name of
+  several arities it says whose chain it shows (`mergedArities`).
+- `find_overrides` finds the overridden member when the overriding type has the same simple name
+  as its base, and names a row that stands for same-named types (`mergedNamesakes`).
+- `explain_symbol`, `get_context`, `pack_for_task` and `prepare_task` render every type that
+  shares the asked-for name, not just one of them; `pack_for_task` and `prepare_task` no longer
+  add a same-named type their ranking left out. `explain_symbol`'s callers render a caller that
+  references the symbol only through a field type or base list as its own declaration.
+- `check_pattern_drift` takes `Type.Member` and `Ns.Type` and notes repeated and shared names;
+  `symbol_metrics` and `calls_external` name the project of a row two projects compile alike;
+  `assert_absence` names a namespace-qualified type in a `no_tests` claim.
+
+### Empty answers say why
+
+- When a name resolves to nothing, `nearest` also finds a declared name that begins like the
+  query, and names the one type that declares a member asked for on the wrong type.
+  `find_usages` and `impact_of_change` explain a `not_found` where they can (a member on a type
+  that does not declare it, a namespace-qualified type name).
+- `coverage_gaps`, `describe_api_surface` and a ranked `symbol_metrics` say when the scope
+  matched no namespace, with the closest one.
+- `find_unresolved_bindings` says how many binding sites it judged (`sitesJudged`) and skipped
+  (`sitesSkipped`, by reason in `sitesSkippedBy`), so a zero has a denominator; on a session
+  recalled from the database it again says its zero is not a measurement.
+
+### Other changes
+
+- **`describe_api_surface` lists public events**, by the same visibility rule as properties, and
+  `diff_public_contract` reports a removed event as breaking and an added one as additive.
+- The descriptions of `solution_metrics` and `check_solution_config_drift` say that an older
+  database passed as `dbPath` is upgraded on open; neither tool writes anything of its own. The
+  `save_session` description no longer says a snapshot loses its line numbers.
+- `SECURITY.md` names the current update command, and the README's GitHub Action example pins a
+  release (`@v0.5.502.1` with `version: 0.5.502.1`).
+
 ## 0.5.501.1 (2026-10-09) - `aicb init` sets up Codex and OpenCode, namespace exclusions keep what you name, and every answer about a session uses one layer profile
 
 **Who is affected.** Everyone on the MCP server: reconnect your client once - 12 tools of the
