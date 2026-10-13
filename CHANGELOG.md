@@ -12,7 +12,17 @@ required. **Scripts that read `find_usages` or `impact_of_change` items as strin
 `name`** - every item of `usedBy` and of `directImpact` is now an object `{name, file, line}`.
 Exported documents change in their dependency lists and call lists (below). A snapshot, saved
 session or remembered codebase from an earlier version is analyzed afresh the first time it is
-used. The configuration database is not changed.
+used. The configuration database is not changed. Codex users: the first call on a large solution
+no longer runs into Codex's 60-second tool limit once the entry carries the new timeout - run
+`aicb init --force`, or add `tool_timeout_sec = 300` to the `aicb` entry by hand.
+
+### Codex: a tool timeout for the first analysis
+
+- **`aicb init` gives the Codex entry in `.codex/config.toml` a tool timeout of 300 seconds**
+  (`tool_timeout_sec = 300`). Codex gives up on a tool call after 60 seconds by default, and the
+  first call on a solution analyzes it, which takes longer than that on a large solution. An
+  `aicb` entry that is already there is left as it is, so an earlier run's entry keeps the
+  default: `aicb init --force` rewrites it with the line, or add the line by hand.
 
 ### Where every user is: file and line
 
