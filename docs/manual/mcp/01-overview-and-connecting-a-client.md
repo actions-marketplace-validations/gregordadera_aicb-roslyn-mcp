@@ -131,7 +131,7 @@ Restart or reconnect your MCP client, then call server_info to confirm it took.
 
 That last line is the step `init` cannot do for you: a client reads its server list at startup. If you only want the server wiring and no guard, pass `--hooks none`. That writes no enforcement; it does not remove an installation that is already there, and it still registers the server for a Codex or OpenCode project.
 
-One client-specific step stays with you, and the output names it: **Codex** reads a project's `.codex/config.toml` only in a project it trusts. Open Codex in the folder once and trust it, or the `aicb` entry stays invisible to it.
+One client-specific step stays with you, and the output names it: **Codex** reads a project's `.codex/config.toml` only in a project it trusts. Open Codex in the folder once and trust it, or the `aicb` entry stays invisible to it. The entry `init` writes for Codex carries `tool_timeout_sec = 300`, because Codex gives up on a tool call after 60 seconds by default and the first call on a large solution analyzes it; an entry written by an earlier version lacks the line - run `aicb init --force`, or add it by hand.
 
 ### Writing the client entry by hand
 

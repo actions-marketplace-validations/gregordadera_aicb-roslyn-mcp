@@ -39,15 +39,16 @@ Markup connects views to view-models and to resources by string. Resource keys h
 | `unresolvedBindings` | One entry per finding: `view`, `viewModel`, `member` (the absent root member), `line` (1-based line of the binding attribute; `0` means unknown). |
 | `markupFilesScanned` | Markup files discovered by a live disk walk of the session's project directories. |
 | `bindingSitesInMarkup` | Binding sites found by the same live walk - the markup population. |
-| `sitesJudged`, `sitesSkipped` | The resolver's denominator. `0` when the walk found no binding site, otherwise `null` (see the note below). |
-| `judgementNote` | Present when `sitesJudged`/`sitesSkipped` are `null`; explains why. |
-| `note` | Present when the zero needs qualification: a session without a completeness fact (a recalled snapshot), an incomplete analysis run, or a solution with no markup at all. |
+| `sitesJudged`, `sitesSkipped` | The denominator of `count`: the binding sites whose root member was checked on a resolved type, and the sites the tool skipped. `null` on a session without a live verdict (a recalled snapshot); `0` there only when the live walk found no binding site at all. |
+| `sitesSkippedBy` | The skipped sites, counted per reason. Omitted when nothing was skipped. |
+| `judgementNote` | Present only when the judged population differs from `bindingSitesInMarkup`, naming each part of the difference with its number: element-syntax `<Binding Path="X"/>` sites (counted as judged or skipped, but not in `bindingSitesInMarkup`, which lists the `{Binding}` form only), markup edited since the analysis (call `refresh_session`), and sites that could not be attributed, with how many of them are element-syntax sites. On a recalled session it says why both counts are `null`. |
+| `note` | Present when the zero needs qualification: a session without a live binding verdict (a recalled snapshot), an incomplete analysis run, or a solution with no markup at all. |
 
-Note: `bindingSitesInMarkup` is the live scan total, not the denominator of `count` - it includes the scopes this tool conservatively skips. Because the analysis model stores only the unresolved findings and not the per-site eligibility decision, `sitesJudged` and `sitesSkipped` are `null` on every solution that has bindings, and `judgementNote` says so. Read the population counts as the measure of what was looked at, and a hit as high-confidence evidence that you verify at its `file:line`, not as proof.
+Note: `bindingSitesInMarkup` is the live scan total, not the denominator of `count` - it includes the scopes this tool conservatively skips. `sitesJudged` and `sitesSkipped` are the decisions of the same analysis pass that produces the findings, so a zero has a denominator. Read a hit as high-confidence evidence that you verify at its `file:line`, not as proof.
 
 Note: identical findings from multi-targeted analysis instances are deduplicated, so a site is reported once, not once per target framework.
 
-Note: the verdict is computed live during analysis and is not persisted. A session recalled from a saved snapshot therefore reports none, and the `note` says so. Call `refresh_session` after markup or view-model edits and run the tool again.
+Note: the verdict is computed live during analysis and is not persisted. A session recalled from a saved snapshot therefore reports none, with `sitesJudged` and `sitesSkipped` at `null`, and the `note` says so. Call `refresh_session` after markup or view-model edits and run the tool again.
 
 Note: the same findings also appear in `list_insights` as the `design-unresolved-xaml-binding` insight, so a review of that insight sees them without calling this tool.
 
@@ -190,6 +191,8 @@ Note: `pack_for_task` always renders the lean bundle - its render deliberately s
 
 Note: on a multi-targeted solution, the bundle is deduplicated to one logical project per name, using the newest target framework's instance - the same view `find_symbol` uses.
 
+Note: when several types share a name the goal names, every one of them renders. A same-named type that the ranking left out is not added.
+
 Availability: in the default tool set; usable as a sub-query of `batch`.
 
 ### `prepare_task`
@@ -213,9 +216,11 @@ Availability: in the default tool set; usable as a sub-query of `batch`.
 <!-- prepare_task | goal: "..." | seeds: ... | tests: ... | siblings: ... | render: lean -->
 ```
 
-Each bundled test carries its evidence tier: `(invokes)` means the test calls the symbol, `(invokes-via)` means it reaches the symbol through one method it calls, and `(name)` is a name guess. When nothing in the list invokes the symbol at either hop, the manifest says so. At most 40 covering tests are bundled per bundle; a cap is disclosed as `(+N more, capped)`. An axis that found nothing reads `(none)`. The `render` segment reads `lean` or `template`.
+Each bundled test carries its evidence tier: `(invokes)` means the test calls the symbol, `(invokes-via)` means it reaches the symbol through one method or constructor it calls, and `(name)` is a name guess. When nothing in the list invokes the symbol at either hop, the manifest says so. At most 40 covering tests are bundled per bundle; a cap is disclosed as `(+N more, capped)`. An axis that found nothing reads `(none)`. The `render` segment reads `lean` or `template`.
 
 Note: on a multi-targeted solution, the bundle is deduplicated to one logical project per name, using the newest target framework's instance.
+
+Note: when several types share a name the goal names, every one of them renders. A same-named type that the ranking left out is not added.
 
 Availability: in the default tool set; not usable as a sub-query of `batch` (it is a heavyweight renderer).
 
@@ -329,18 +334,22 @@ Availability: not in the default tool set; expose it with the `Full Select` prof
 | Field | Meaning |
 |---|---|
 | `symbol` | The name you passed. |
-| `note` | Present when the name resolved to nothing or when the counts are the union across several same-named types. |
+| `note` | Present when the name resolved to nothing (the entry then carries no risk), or when the risk was graded on the direct fan-in or on the implementing types alone. |
 | `resolvedKind` | What the name resolved to: `type`, `method`, `property`, `field`, `event`, `enum_member`, `not_found`. |
 | `directUsages` | Number of direct users or callers. |
 | `transitiveImpact` | Number of dependents through chains. |
-| `risk` | `none`, `low`, `medium` or `high`, calibrated on production fan-in only - test callers count toward the usage numbers but not toward the risk. |
-| `implementations` | The types implementing the symbol, when it is an interface. |
+| `risk` | `none`, `low`, `medium` or `high`, graded as `impact_of_change` grades it - test callers count toward the usage numbers but not toward the risk. |
+| `implementations` | The types implementing the symbol, when it is an interface. Test doubles are listed too; `find_implementations` filters them by default. |
 | `invokesTotal` | How many of the covering tests are strong matches. |
+| `dispatchTotal` | How many reach the symbol through an interface or abstract member. Omitted at 0. |
 | `coveringTests` | The covering test methods, each with its evidence tier. |
+| `coveringTestsTotal`, `coveringTestsTruncated` | The full number of covering tests, and whether the list was cut. |
 
-Note: `coveringTests` is the `find_tests_for` list under the same contract - strong `invokes` matches are ordered ahead of weak name guesses, and `invokesTotal` names how many of them are strong. Ranking by position is therefore meaningful, and you can see where the evidence stops.
+Note: `coveringTests` is the `find_tests_for` list under the same contract - strongest evidence first - and `invokesTotal` names how many of them are strong. Ranking by position is therefore meaningful, and you can see where the evidence stops.
 
-Note: unlike `find_tests_for`, this tool applies no cap - a symbol with a hundred covering tests contributes a hundred rows. Budget the symbol list accordingly.
+Note: the list is capped at 50 per symbol and keeps the 50 strongest rows: name guesses go first, strong rows too once there are more than 50. `invokesTotal` and `dispatchTotal` count the whole list and can exceed the rows shown; `coveringTestsTotal` minus both is the number of name guesses. `find_tests_for` stops at the same 50, so narrow the symbol rather than re-query.
+
+Note: when the risk stands only on the implementing types - no production code calls the interface or abstract member - the row's `note` says so with the same sentence `impact_of_change` puts in `riskBasis.note`. For a bare name several types share, the counts are their union and no note says so; `find_usages` names the namesakes. For a qualified method, `directUsages` and `transitiveImpact` include callers credited through the interface or abstract members it implements.
 
 Note: the response is ordered by symbol name, not by the order you passed the symbols. Index it by `symbol`, never by request position.
 

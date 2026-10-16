@@ -20,7 +20,7 @@ analysis and editing.
 > organizations below the [license thresholds](#license-at-a-glance).
 
 This page is a short tour, not the reference. It names 35 of the 54 tools an agent
-sees by default; the three [manuals](#documentation) run to 35 chapters, about 35
+sees by default; the three [manuals](#documentation) run to 35 chapters, about 36
 times the length of this page.
 
 ## See it answer a code question
@@ -45,7 +45,15 @@ Abridged output from the bundled `ColorMixer.SelectionLab` sample:
   "transitiveCount": 2,
   "risk": "low",
   "productionImpactCount": 2,
-  "directImpact": { "items": ["DemoCompositionRoot"] }
+  "directImpact": {
+    "items": [
+      {
+        "name": "DemoCompositionRoot",
+        "file": "ColorMixer.SelectionLab.ConsoleApp/DemoCompositionRoot.cs",
+        "line": 9
+      }
+    ]
+  }
 }
 ```
 
@@ -303,16 +311,19 @@ the .NET 10 SDK, installs the published tool, restores the solution and runs
 written:
 
 ```yaml
-- uses: gregordadera/aicb-roslyn-mcp@main
+- uses: gregordadera/aicb-roslyn-mcp@v0.5.502.1
   with:
+    version: 0.5.502.1
     solution: App.sln
     output: artifacts/context.md
     fail-on: "critical>0 OR debt>120min"
 ```
 
-`@main` follows every change to the action. Pinning it to a commit SHA, or to a release tag
-that already contains `action.yml`, is the safer choice for a build you depend on. Further inputs are `version` (the package
-version, latest by default), `dotnet-version`, `restore` and `args` for other
+The example pins both halves: `@v0.5.502.1` fixes the action, `version` fixes the package it
+installs. Without `version` the action installs the newest published package, and `@main`
+follows every change to the action, so neither belongs in a build you depend on. A release
+tag can in principle be moved; the full commit SHA of that tag is the immutable form. Further
+inputs are `dotnet-version`, `restore` and `args` for other
 `aicb analyze` options; the outputs are `output` and `exit-code`. See
 [`action.yml`](https://github.com/gregordadera/aicb-roslyn-mcp/blob/main/action.yml).
 
@@ -707,7 +718,7 @@ issues privately as described in [`SECURITY.md`](https://github.com/gregordadera
 ## Documentation
 
 Everything above is the short version. The three manuals below hold the full reference -
-35 chapters, each manual roughly 70,000 words, together about 35 times the length of this
+35 chapters, each manual roughly 70,000 words, together about 36 times the length of this
 README.
 
 - [Getting started](https://github.com/gregordadera/aicb-roslyn-mcp/blob/main/docs/GETTING-STARTED.md) - install, connect and ask the first question

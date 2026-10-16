@@ -237,7 +237,7 @@ In the lean projection each index entry is a bare name; with `detail: "full"` ea
 
 ### `describe_api_surface`
 
-**Purpose.** List the public API surface of a solution or namespace - every externally visible type with its externally visible members (constructors, properties, fields, methods, user-defined operators), each as a compact declaration signature. The "header"/contract view: what a consumer of this assembly can actually reference, without the source bodies.
+**Purpose.** List the public API surface of a solution or namespace - every externally visible type with its externally visible members (constructors, properties, fields, events, methods, user-defined operators), each as a compact declaration signature. The "header"/contract view: what a consumer of this assembly can actually reference, without the source bodies.
 
 **When to use.** To review a public contract before changing it, to see what an assembly really exposes, or as the baseline for a contract comparison (save a snapshot with `save_session` and compare later with `compare_with_previous`; the dedicated contract-diff tools are outside the default pool).
 
@@ -250,12 +250,14 @@ In the lean projection each index entry is a bare name; with `detail: "full"` ea
 | `includeInternal` | `bool` | no | `false` | Additionally surface the internal family (`internal` / `private protected`) types and members. |
 | `includeTests` | `bool` | no | `false` | Include test projects. |
 
-**Response.** JSON: `scope`, `includeInternal`, `typesScanned` and `types` (a capped envelope; the true total travels in the envelope). Each type carries `name`, `fullName`, `kind`, `accessibility`, `namespace`, `baseType`, `interfaces` and `members`; each member carries `kind` and `signature`. The type list is capped at 200; members per type are complete.
+**Response.** JSON: `scope`, `includeInternal`, an optional `note`, `typesScanned` and `types` (a capped envelope; the true total travels in the envelope). Each type carries `name`, `fullName`, `kind`, `accessibility`, `namespace`, `baseType`, `interfaces` and `members`; each member carries `kind` and `signature`. The type list is capped at 200; members per type are complete.
 
 **Notes and limits**
 
 - A type is included when its *own* declared accessibility is externally visible - `public` or the protected family (reachable by a subclass in another assembly); its members likewise.
 - A property renders only the accessors that are themselves visible (`{ get; private set; }` shows as `{ get; }`); a `const` carries its value; an enum is listed as a type (its values are not in the model).
+- Events follow the visibility rule of properties and render as their declaration, for example `public event EventHandler? Changed`: an interface event is listed, an explicit interface implementation is not.
+- A `scope` prefix that matches no namespace gets a `note` ahead of `typesScanned: 0`, so an empty surface is not read as "nothing is public". The note says where to look instead: the namespace of a type the prefix names, the namespaces that contain the prefix as whole segments, or the closest namespace.
 - A `partial` type is folded into one entry: members and interfaces of its declaration fragments are unioned, and a partial method's defining and implementing declarations count once. A multi-targeted type is listed once.
 - Two documented simplifications: accessibility is the type's own declared modifier - the effective accessibility through the nesting chain is not computed, so a public member of a type nested in an internal type is still listed; and a type declared with no access modifier is stored as private, so a modifier-omitted (compiler-internal) top-level type is not surfaced even with `includeInternal: true`.
 - Production-focused: test projects are excluded by default, because a shipped API surface is production code.
@@ -447,7 +449,7 @@ Also call it with `force: true` after a restore or build that was meant to repai
 
 **Notes and limits**
 
-- A user-defined operator is found by its *metadata* name: query `op_Equality`, `op_Addition` or `op_Implicit`, and `op_` lists them all. Note that an operator carries no fan-in: `a == b` is no invocation the call index records.
+- A user-defined operator is found by its *metadata* name: query `op_Equality`, `op_Addition` or `op_Implicit`, and `op_` lists them all. Every kind listed here is one that `find_usages` and `impact_of_change` resolve; an operator resolves by the same metadata name, with its uses - `a == b`, a cast, an implicit conversion - as its fan-in.
 - Not indexed, so an empty answer is expected for them: local variables, parameters, labels and namespaces.
 - When the query matches nothing, `nearest` names the closest declared symbol - a likely typo or case mismatch. A matched symbol never carries it.
 - Dispatchable through `batch`/`measure`.
@@ -469,7 +471,8 @@ Also call it with `force: true` after a restore or build that was meant to repai
 
 **Notes and limits**
 
-- `file` is the fragment's *own* file: for a partial type, a method points at the file the method lives in, not at the first type fragment. It is omitted only when the snapshot carries no path, and a member's `line` is `null` - no line fact is modeled for members.
+- `file` is the fragment's *own* file: for a partial type, a method points at the file the method lives in, not at the first type fragment. It is omitted only when the snapshot carries no path.
+- `line` is the line the declaration starts on, a leading attribute included - for types, methods, operators, properties, fields and events alike. It is `null` for an enum member and for a source-generated property, for which no line fact is modeled.
 - Matching is exact, so a typo or case mismatch returns an empty list rather than an error; the `nearest` suggestion distinguishes "you spelled it differently" from "this symbol genuinely has no signature". Multiple results are returned for overloads or name collisions.
 - Leaner than `get_context`, which returns the full source.
 - Dispatchable through `batch`/`measure`.
@@ -501,6 +504,7 @@ Also call it with `force: true` after a restore or build that was meant to repai
 **Notes and limits**
 
 - Multi-TFM solutions are deduplicated to one logical project per name, keeping the newest target framework's instance - the same view `find_symbol` lists. `export_markdown` deliberately keeps the unfiltered per-target-framework render.
+- When several types share the name you pass (in different namespaces), every one of them renders, not only one.
 - Dispatchable through `batch`/`measure`.
 
 ### `explain_symbol`
@@ -519,17 +523,17 @@ Also call it with `force: true` after a restore or build that was meant to repai
 | `budget` | `int` | no | `null` | Token budget, floored at 8000; behaves as in `get_context`. |
 | `lean` | `bool` | no | `true` | As in `get_context`. |
 
-**`symbol`.** A bare name that matches several declarations seeds them *all*; the manifest says so and names the qualified form to use instead. The qualified `Type.Member` form focuses one declaration of a shared method name - the same string `find_usages`, `find_tests_for` and `impact_of_change` resolve.
+**`symbol`.** A bare name that matches several declarations seeds them *all*, and every type that shares the name renders; the manifest says so and names the qualified form to use instead. The qualified `Type.Member` form focuses one declaration of a shared method name - the same string `find_usages`, `find_tests_for` and `impact_of_change` resolve.
 
 **`include` axes** (case-insensitive):
 
 | Axis | What it adds |
 |---|---|
-| `callers` | The members that reference the symbol, with their bodies, and their owner types as structure - not the calling types whole. |
+| `callers` | The members that reference the symbol, with their bodies, and their owner types as structure - not the calling types whole. A caller that references the symbol only from its structure (a field or property type, a base list) renders as that caller's own declaration. |
 | `callees` | What the symbol calls or depends on, depth 1. This is the widest slice this server produces. |
-| `implementations` | The types implementing it, if it is an interface. |
+| `implementations` | The types implementing it, if it is an interface. Every same-named type the axis lists renders. |
 | `tests` | Its covering test cases. |
-| `siblings` | Naming and file-convention kin. |
+| `siblings` | Naming and file-convention kin. Every same-named type the axis lists renders. |
 | `quality` | Complexity and efferent-coupling hotspot metrics. |
 
 **Response.** Markdown with a leading *manifest* comment that discloses what each requested merge axis actually found - so `(none)` is an honest negative (no implementation, no caller, no test), not "not asked". A partial type renders as one block (its declaration fragments are folded; a leading comment says which files) instead of one identical block per file.

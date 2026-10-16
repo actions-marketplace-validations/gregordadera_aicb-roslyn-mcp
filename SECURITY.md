@@ -15,7 +15,10 @@ any public disclosure.
 
 Security fixes ship in a new public release; older versions do not get patch
 releases. Update to the latest release to receive them (`dotnet tool update -g
-AIContextBuilder`, or the newest installer). A commercial agreement can define a
+aicb-roslyn-mcp`, or the newest installer). Up to version 0.5.465.1 the package
+was called `AIContextBuilder`; an installation of that package is updated by
+uninstalling it (`dotnet tool uninstall -g AIContextBuilder`) and installing
+`aicb-roslyn-mcp`. A commercial agreement can define a
 maintenance window for an older version.
 
 ## Threat model

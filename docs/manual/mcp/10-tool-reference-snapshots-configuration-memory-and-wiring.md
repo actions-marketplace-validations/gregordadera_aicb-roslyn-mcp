@@ -35,7 +35,7 @@ A snapshot is a persisted copy of the analyzed model of a solution inside an aic
 
 **Notes and limits.**
 - The snapshot is stored as a *manual* snapshot. The automatic retention that caps the memory tools' snapshot history never deletes a manual snapshot, so a baseline stays until it is removed deliberately.
-- Snapshots lose line numbers (`startLine`/`endLine`) on the database round-trip. Line-number-dependent output is therefore degraded when a snapshot is read back.
+- The snapshot keeps the line spans of the analysis, but a session recalled from it reports `lineNumbersAvailable: false`: its lines mean "as analyzed", not the current working tree.
 - Without an explicit `dbPath` the snapshot lands in the database the GUI uses.
 
 ### `compare_with_previous`
@@ -87,7 +87,7 @@ A snapshot is a persisted copy of the analyzed model of a solution inside an aic
 - `removedTypes`, `removedMembers`, `changedMembers`, `addedTypes`, `addedMembers` - the five diff lists, each a capped envelope with `items`, `count`, `totalFound` and `truncated`.
 
 **Notes and limits.**
-- Classification: a removed public type or member, or a changed member signature, is **breaking**; an added type or member is **additive**.
+- Classification: a removed public type or member, or a changed member signature, is **breaking**; an added type or member is **additive**. Events count as members: a removed public event is breaking, an added one additive.
 - Both sides are projected through the same public-surface view, so the comparison is like for like.
 - The comparison is name- and signature-based; method bodies are not diffed. A change of a parameter *type* appears as a removal plus an addition.
 - At least one earlier `save_session` is required; a missing baseline is rejected with a message telling you to save one first.
@@ -207,7 +207,7 @@ Three per-solution settings decide how aicb reads your code: the **layer profile
 | `dbPath` | string? | no | `null` | The aicb config/master database. If given, its active layer profile, exclusion list and test profile take precedence over the sidecar. Omit to fall back to the server's standard config DB, or - when the server has none - to the `.aicb.json` sidecar only. |
 
 **Response.** One axis object each for `layer`, `exclusion` and `test`, with:
-- `source` - where the checked configuration came from (`db`, `sidecar` or `none`).
+- `source` - where the checked configuration came from (`db`, `sidecar`, `built-in` or `none`).
 - `name` - its display name.
 - `status` - `stale`, `ok`, `not-configured` or `built-in-preset`.
 - `stale` - the boolean shorthand for `status == "stale"`.
@@ -224,9 +224,9 @@ Three per-solution settings decide how aicb reads your code: the **layer profile
 | Test | unmatched | Projects the canonical default heuristic classifies as test projects that the rules of the active custom test profile do not match - the profile may be too narrow. |
 
 **Notes and limits.**
-- Although the tool reports drift rather than applying configuration, resolving an unknown solution ensures its row in the configuration database and can insert that row.
+- The tool changes no configuration and creates no solution row. A `dbPath` that does not exist is refused with an error; an existing database of an older schema is upgraded on open (schema and built-in rows), as the server upgrades its own at startup.
 - Only a **custom** configuration is evaluated. A built-in preset (for example the Clean Architecture layer profile, the BCL exclusion default or the default test heuristic) and an empty or role-heuristic configuration are reported as `not-configured` or `built-in-preset` - a deliberate generic choice is not stale.
-- An axis reports `stale` once the drift count reaches the threshold of 3; below that it reports `ok` with the evidence still listed.
+- The layer and exclusion axes report `stale` from 3 drifted names on, the test axis when more than a quarter of the considered projects drifted; below that an axis reports `ok` with the evidence still listed. `sidecarProblem` appears when the `.aicb.json` could not be read.
 - A database-active id that no longer resolves (a deleted profile) falls back cleanly to the sidecar or to `none`.
 - Requires a live session.
 

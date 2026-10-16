@@ -81,6 +81,7 @@ Behavior:
 - Once a guard is installed it *blocks*: a C# symbol search is refused and redirected to the aicb tools. The output names, per harness, the wiring file whose `aicb` entry removes the guard again. `--hooks none` writes no enforcement on the next run; it does **not** remove an installation that is already there.
 - Skills are written to `.claude/skills/`. For Codex and OpenCode - detected, or named with `--hooks` - they are also written to `.agents/skills/`, and the server is registered in `.codex/config.toml` or `opencode.json`, because neither reads the shared `.mcp.json`. `--hooks none` skips only the guard; this registration still happens.
 - After writing `.codex/config.toml` the output says that Codex reads it only in a project you have trusted in Codex.
+- The Codex entry carries `tool_timeout_sec = 300`: Codex gives up on a tool call after 60 seconds by default, and the first call on a large solution analyzes it, which can take longer. An `aicb` entry that is already there is left as it is; `aicb init --force` rewrites it with the line, or add the line by hand.
 - If more than one `aicb` installation is found, a warning lists them: every MCP client starts the *first* one on the search path, so updating another one changes nothing a client runs. The warning names how to remove the extra installation.
 - The last line is always the same reminder: `Restart or reconnect your MCP client, then call server_info to confirm it took.`
 
