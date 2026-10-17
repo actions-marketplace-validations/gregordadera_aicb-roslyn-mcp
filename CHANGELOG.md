@@ -34,8 +34,8 @@ downloads.
   that type. The helper's own registration line is listed once, at the calls read through it.
 - **`ServiceDescriptor` registrations and hosted services:** `Add`, `TryAdd`, `TryAddEnumerable`
   and `Replace` with a descriptor the call builds, and `AddHostedService<T>()` (as a Singleton
-  `IHostedService`), are read; the rows carry the method in their `note`. Adds to a collection are
-  not reported as conflicts.
+  `IHostedService`), are read; the rows carry the method in their `note`. `TryAddEnumerable` and
+  `AddHostedService` rows are not reported as conflicts.
 - **Package helper chains** such as `AddSingletonAs<T>().As<I>()`, whose body sits in a package,
   appear as rows marked `inferred, not read`; they never decide `ambiguous` or the effective
   registration.
@@ -45,7 +45,7 @@ downloads.
   its type arguments** - breaking for a script that compared it with a bare name.
 - **An empty answer says why:** the note names the forms that are not read and which of them the
   solution uses (package registration helpers, assembly scans, convention-based registration,
-  other containers), scoped to the answer's filters.
+  other containers).
 - **Repeat queries are fast:** further `resolve_injection` calls on an unchanged solution reuse
   the first call's work, also inside `batch` and `measure`; after an edit the next call reads the
   solution again.
@@ -65,9 +65,9 @@ downloads.
 - **WPF XAML:** a handler wired to any event (`Loaded="OnLoaded"`, `SelectionChanged`, attached
   events, `EventSetter`) is a use of the code-behind method, and a property set in markup
   (attribute, property element, `Setter`, `Trigger`, `Condition`, attached properties also under a
-  URI prefix such as `materialDesign:`) is a use of that property. `find_usages` names the `.xaml`
-  file and `find_dead_code` no longer lists such members. Avalonia `.axaml` event wires are not
-  read yet.
+  URI prefix such as `lib:`) is a use of that property. `find_usages` names the `.xaml`
+  file and `find_dead_code` no longer lists such members. In Avalonia `.axaml` files, event wires and
+  property sites are not read yet.
 - **Blazor `.razor`:** members named in `@code` blocks, in code-block statements and in component
   parameter values written without `@` count, and so do calls through an injected member
   (`@inject`, `[Inject]`, also from `_Imports.razor`) or through the component's own fields and
@@ -78,8 +78,10 @@ downloads.
 
 - **Committed generated files are read:** a `*.Designer.cs` or `*.g.cs` that is part of the
   repository (designer halves, resource accessors, checked-in generator output) is analyzed, so its
-  types and event wiring count; the same names in build output stay out. Machine-written code is
-  never reported by the quality tools, so handlers wired in a designer file are no longer dead.
+  types and event wiring count and handlers wired in a designer file are no longer dead; the same
+  names in build output stay out. Machine-written code itself is never reported by the quality
+  tools. On WinForms code, effects reached through a designer's `InitializeComponent` now count
+  toward the handwritten constructor that calls it.
 - **Attributes at every position:** an attribute on a parameter, return value, type parameter,
   local function or lambda is a use of the attribute type; an assembly- or module-level attribute
   is credited to its file, shown as `<file> (assembly)` or `<file> (module)`.
@@ -93,11 +95,15 @@ downloads.
 ### Same names in several projects
 
 - `find_usages` and `impact_of_change` list **one item per declaration** behind a shared name, so
-  `totalFound` counts users; such items add `fullName` and `project`. `impact_of_change` follows
+  `totalFound` counts users; such items add `project`, and a type also its
+  `fullName`. `impact_of_change` follows
   its chain per declaration, `directCount` equals `find_usages`' `totalFound`, and `review_context`
   uses the same numbers. A referencing type's `files` no longer lists namesakes of other projects.
 - `find_symbol` and `symbol_signature` keep two same-named types of two projects as two results,
   each with `project`.
+- A method's interface and base contracts now come only from its own declaration, so a same-named
+  type in another project no longer adds or removes them. `impact_of_change` (implementers and
+  risk), `coverage_gaps` and usages credited through a contract can change where that happened.
 - `get_type_hierarchy` lists **each derived type once**; where two would read alike, the line
   names the full name, and where even that is shared, the project in brackets.
 - `find_production_dead` (Full Select profile) judges each declaration on its own and no longer
@@ -125,17 +131,17 @@ downloads.
   where a workload is missing.
 - **A source generator that did not run** is named on answers about the affected projects:
   `generatedCodeNote` on `find_usages`, `impact_of_change`, `instantiation_sites`,
-  `find_tests_for`, `find_implementations` and `get_type_hierarchy`; `find_dead_code` marks such
-  candidates `missingGeneratedCode: true`; a zero-hit `find_symbol` or `symbol_signature` says so in
+  `find_tests_for`, `find_implementations`, `get_type_hierarchy` and `find_dead_code`, which also
+  marks such candidates `missingGeneratedCode: true`; a zero-hit `find_symbol` or `symbol_signature` says so in
   `generatedSourcesNote`.
 
 ### Other changes
 
 - **`architecture_overview` stays small on very large solutions:** the type-to-layer map lists
   every type up to 2,000 and per-layer counts above, and the truncation block names it;
-  `export_markdown` keeps the full map. It is also much faster on solutions where many types share
-  a name, and `solution_metrics`, `coverage_gaps` and `list_insights` are much faster on very large
-  solutions; their answers are unchanged.
+  `export_markdown` keeps the full map. It is also much faster on very large solutions, and
+  `solution_metrics`, `coverage_gaps` and `list_insights` are much faster on very large
+  solutions.
 - The README's GitHub Action example pins this release (`@v0.5.503.1` with `version: 0.5.503.1`).
 
 ## 0.5.502.1 (2026-10-13) - Usage answers name the file and line of every user, operators count as uses, and impact_of_change weighs what implements a contract
