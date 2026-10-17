@@ -4,7 +4,7 @@ Versions follow `Major.Minor.Series.Build`. The build number rises by one for ev
 change that lands, so gaps between published versions are normal - not every build is
 released.
 
-## 0.5.503.1 (unreleased) - Signed Windows downloads, resolve_injection reads far more registrations, and markup counts as usage
+## 0.5.503.1 (2026-10-17) - Signed Windows downloads, resolve_injection reads far more registrations, and markup counts as usage
 
 **Who is affected.** Everyone on the MCP server: reconnect your client once - 9 tools of the
 default profile have a new description (`architecture_overview`, `find_dead_code`,
