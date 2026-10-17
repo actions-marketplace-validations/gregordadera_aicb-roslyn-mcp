@@ -115,6 +115,7 @@ For the MCP analysis itself, resolution is per axis:
 | Namespace exclusions | database, as soon as a usable database exists > sidecar > none |
 | Test profile | database (per-solution, then global) > built-in default; the sidecar's test definition is not in this chain |
 | Analysis scope | sidecar |
+| Design-time build platform | sidecar key `designTimeBuildPlatform` (written by hand; `apply_solution_config` keeps it when it rewrites the file) |
 | Suppressions | not part of the semantic analysis configuration; suppression-aware reading tools combine their documented database and sidecar sources |
 | Auto-init flags | reported as setup state where applicable, not evaluated by headless analysis |
 
@@ -123,6 +124,8 @@ A repository with only a sidecar can therefore supply layer rules, exclusions an
 `solution_config_status` reports, per axis, which source is currently active: `db`, `sidecar` or `none`.
 
 Note: a session keeps the configuration it was analyzed with. `refresh_session` re-analyzes the source with that same configuration - it deliberately does not re-read the sidecar, because a silent configuration switch under an unchanged session id would be invisible. If you have edited the sidecar and want the new values to apply, call `analyze_solution` again (or restart the server or wait for the cached session to expire). Passing the same `.sln` path to another tool reuses a non-expired cached session and does not re-read the sidecar.
+
+The design-time build platform is the one exception, because it is a property of the build rather than of the analysis: `"designTimeBuildPlatform": "x64"` names a platform as the solution's configuration manager does (`x64`, `ARM64`, `Any CPU`), and every full reload reads it afresh - `refresh_session` with `force: true` applies an edit, while an unforced refresh after an edit of the sidecar alone keeps the platform the session was loaded at. A value the solution file does not name, or one under which the solution maps its projects to several platforms, is refused and the automatic choice applies; a blank value or one that is not a JSON string makes the whole file malformed, like any other broken axis. `get_diagnostics` reports the platform that ran and where it came from.
 
 ### What the desktop application writes and what the server reads
 
@@ -388,7 +391,7 @@ Besides the tools, the server registers **resources**: content a client fetches 
 | `acb://docs/{topic}` | `aicb_manual_page` | `text/markdown` | `topic` | One manual page or a resolved route. Page ids: `overview`, `install`, `first-context`, `navigation`, `solution-config`, `glossary`; route: `init` |
 | `acb://sessions/{id}/markdown` | `session_markdown` | `text/markdown` | `id` | The rendered context document of an analyzed session |
 | `acb://sessions/{id}/insights` | `session_insights` | `application/json` | `id` | The insights of an analyzed session - the same content `list_insights` returns |
-| `acb://sessions/{id}/architecture` | `living_architecture` | `text/markdown` | `id` | The structural-only overview of the whole solution, with the format preamble and without per-type source; test projects excluded |
+| `acb://sessions/{id}/architecture` | `living_architecture` | `text/markdown` | `id` | The structural-only overview of the whole solution, with the format preamble and without per-type source; test projects excluded; its layer map is bounded as in `architecture_overview` |
 | `acb://quality-profiles` | `quality_profiles` | `application/json` | - | The built-in insights profiles (default, strict, disabled) with their thresholds and producer toggles |
 
 Three properties to know when you build a client or an integration:

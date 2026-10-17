@@ -202,8 +202,11 @@ The analysis records the relationships between symbols as **edges**. These are t
 | member access | unit → property, field, event or enum member | `find_usages` |
 | markup calls member | view → method | `find_usages` (for example a Blazor event handler referenced only from markup) |
 | top-level statements reference | `Program.cs` → type | `find_usages`, `find_dead_code` (`kinds: type`) |
+| assembly attribute | the file that applies `[assembly: ...]` or `[module: ...]` -> attribute type, labeled with the file path and `(assembly)` or `(module)`, for example `src/App/Properties/AssemblyInfo.cs (assembly)` | `find_usages`, `impact_of_change`, `find_dead_code` (`kinds: type`) |
 
-"Markup" covers WPF `.xaml`, Avalonia `.axaml` and Blazor `.razor` files.
+"Markup" covers WPF `.xaml`, Avalonia `.axaml` and Blazor `.razor` files. In a `.razor` file this includes the C# in `@code` blocks and code-block statements, component-parameter values whose parameter is typed and not a `string`, and calls through an injected member (`@inject`, `[Inject]`) or through a field or property of the component itself, which count for the member on that member's type.
+
+An attribute is a type reference wherever it is applied: on a type, a member, a return value, a parameter, a type parameter, or a local function or lambda.
 
 The type dependency list is the union of the injection dependencies and the usage dependencies of a type, deduplicated, sorted and with self-references removed. Which member types it names is described under `DEPENDENCIES` in the chapter on the context document.
 
@@ -216,6 +219,8 @@ Note: the type dependency list is built from short type names, so two types with
 **Impact** is the transitive closure of the fan-in: everything that would be affected indirectly by a change to the symbol, including consumers that a compiler does not check.
 
 `find_usages` lists the direct mentions, one level, each with the file and the line its declaration starts on. `impact_of_change` returns the closure together with a `risk` level. The risk is calibrated on the production fan-in; callers in test projects are excluded, because exercising a symbol from tests is its designed fan-in and updating those tests is mechanical. On an interface or abstract member or type, the production types that implement it count toward the risk as well, because a signature change breaks them too.
+
+Users that share a name - two types called `Startup` in different projects, for example - are listed by `find_usages` as separate items, one per declaration, and the items that would otherwise read alike add `fullName` (for a type) and `project`. `impact_of_change` walks its closure over declarations in the same way, so `transitiveCount` counts one entry per declaration.
 
 User-defined operators and conversions have a fan-in of their own: `a == b`, a cast and an implicit conversion are uses of the declared operator. The fan-in tools take an operator by its metadata name, such as `op_Equality` or the qualified `Money.op_Implicit`.
 

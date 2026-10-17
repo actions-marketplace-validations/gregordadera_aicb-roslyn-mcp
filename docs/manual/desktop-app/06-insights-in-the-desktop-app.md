@@ -4,6 +4,8 @@
 
 The Insights tab is the app's own quality-review surface. It runs a set of heuristics (the *producers*) over the C# solution currently loaded in the Context Builder and reports what they find as individual findings: long methods, fat interfaces, missing async conventions, unused types, design smells, architecture problems, security-sensitive calls, and more. Each finding tells you what was detected, where it was detected, how expensive a fix is estimated to be, and - for many rules - a recommended approach. The complete rule catalog is described in "Insights: the code quality catalog" in the General manual.
 
+Machine-written files that are committed to the repository - `*.Designer.cs` and `*.g.cs` outside the build output - are read, so the references they hold count, but the producers report no findings in them. The copies a build writes under `obj` or `bin` stay out of the analysis.
+
 Use the tab before a code review, after a larger refactoring, or whenever you want to hand a concrete, pre-selected slice of a problem to your LLM.
 
 ## 6.1 Where the Insights tab lives

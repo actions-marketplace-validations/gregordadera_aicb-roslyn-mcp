@@ -26,7 +26,7 @@ Markup connects views to view-models and to resources by string. Resource keys h
 
 **Coverage.**
 
-- WPF/WinUI `.xaml`: the view-model is resolved through `d:DesignInstance` or through a unique `FooView` → `FooViewModel` naming convention.
+- WPF/WinUI `.xaml`: the view-model is resolved through `d:DesignInstance` or through a unique `FooView` -> `FooViewModel` naming convention.
 - Avalonia `.axaml`: `{Binding}` and `{CompiledBinding}`; the view-model is resolved only through `x:DataType` at scope level, so no naming convention applies.
 
 **What is deliberately skipped.** A binding whose DataContext scope cannot be typed with certainty is never flagged: `ControlTemplate`/`Style`, a runtime DataContext, keyed resources, and a template without a `DataType`. WPF alone recovers an item template's type from the host's pinned `ItemsSource`; on Avalonia, a template without `x:DataType` - `TreeDataTemplate` included - is always skipped. Only view-models resolved with certainty and with a verifiable member surface are checked; source-generated members (`[ObservableProperty]`, `[RelayCommand]`) and inherited members count as resolved. The trade-off is a recall miss, never a false report.
@@ -336,8 +336,8 @@ Availability: not in the default tool set; expose it with the `Full Select` prof
 | `symbol` | The name you passed. |
 | `note` | Present when the name resolved to nothing (the entry then carries no risk), or when the risk was graded on the direct fan-in or on the implementing types alone. |
 | `resolvedKind` | What the name resolved to: `type`, `method`, `property`, `field`, `event`, `enum_member`, `not_found`. |
-| `directUsages` | Number of direct users or callers. |
-| `transitiveImpact` | Number of dependents through chains. |
+| `directUsages` | Number of direct users or callers - the `directCount` of `impact_of_change`, one per declaration. |
+| `transitiveImpact` | Number of dependents through chains - the `transitiveCount` of `impact_of_change`, one per declaration. |
 | `risk` | `none`, `low`, `medium` or `high`, graded as `impact_of_change` grades it - test callers count toward the usage numbers but not toward the risk. |
 | `implementations` | The types implementing the symbol, when it is an interface. Test doubles are listed too; `find_implementations` filters them by default. |
 | `invokesTotal` | How many of the covering tests are strong matches. |

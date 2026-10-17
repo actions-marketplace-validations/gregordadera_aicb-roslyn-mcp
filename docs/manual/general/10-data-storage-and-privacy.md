@@ -264,17 +264,19 @@ Two notes on this table:
 
 ### The per-solution configuration file
 
-The file `<SolutionName>.aicb.json` sits next to your `.sln`. It is meant to be committed with your repository. A database-free headless MCP server or CLI run auto-discovers its layer and exclusion fallbacks and its analysis scope; other fields have the consumer-specific behavior documented in the configuration chapter. It can contain:
+The file `<SolutionName>.aicb.json` sits next to your `.sln`. It is meant to be committed with your repository. A database-free headless MCP server or CLI run auto-discovers its layer and exclusion fallbacks, its analysis scope and its build platform; other fields have the consumer-specific behavior documented in the configuration chapter. It can contain:
 
 - `layerRules` - the layer mapping (pattern, match type, layer),
 - `exclusions` - namespace exclusion patterns,
+- `keepNamespaces` and `exclusionsDisabled` - keep rules that are never excluded, and the opt-out that excludes nothing,
 - `layeringPolicy` - only written when it is not `Advisory`,
 - `testProjectRules` and `testAttributeNames` - the test detection,
 - `autoInit` - the opt-in flags that let a fresh clone initialize the corresponding axes automatically,
 - `suppressions` - triage decisions (producer, type, member, reason),
-- `analyzePreferredTfmOnly` - the analysis-scope opt-in (see "Profiles, master data and solution configuration"; it has no database counterpart and is edited by hand).
+- `analyzePreferredTfmOnly` - the analysis-scope opt-in (see "Profiles, master data and solution configuration"; it has no database counterpart and is edited by hand),
+- `designTimeBuildPlatform` - the platform of the design-time build, read by the desktop app, the CLI and the MCP server (it has no database counterpart either and is edited by hand).
 
-The file is written atomically through a temporary file (`<name>.aicb.json.tmp`); a failed move can leave that temporary file behind. It is hand-editable: comments, trailing commas and case-insensitive keys are accepted, and an invalid value fails the whole file rather than silently dropping one axis - with one exception: a malformed entry in `suppressions` costs only that entry. In the Solutions tab, `Export Config` writes the active layer profile, exclusion list, test profile, triage decisions and the analysis-scope value into the sidecar. `Import Config` reads only the layer and exclusion axes into the desktop database; the remaining fields keep their separate reading paths.
+The file is written atomically through a temporary file of its own, then a replace; a temporary file left by an interrupted write is removed by a later write. It is hand-editable: comments, trailing commas and case-insensitive keys are accepted, and an invalid value fails the whole file rather than silently dropping one axis - with one exception: a malformed entry in `suppressions` costs only that entry. In the Solutions tab, `Export Config` writes the active layer profile, exclusion list, test profile, triage decisions and the analysis-scope value into the sidecar, and keeps a `designTimeBuildPlatform` the file already holds. `Import Config` reads the layer, exclusion and test axes into the desktop database; the remaining fields keep their separate reading paths.
 
 ## 10.7 Removing your data
 

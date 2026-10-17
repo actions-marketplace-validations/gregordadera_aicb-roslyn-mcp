@@ -193,12 +193,18 @@ For the opposite order, installer first and `dotnet tool install` later, `aicb i
 
 ## 2.7 The Windows SmartScreen warning
 
-The installer and the files in the ZIP are not code-signed. On first start Windows may therefore show "Windows protected your PC". To continue:
+From 0.5.503.1 on, the Windows files are digitally signed, with the publisher `Gregor Dadera` and a timestamp: the installer, the uninstaller, and `gui\aicb-ui.exe`, `cli\aicb.exe` and the product's own `AIContextBuilder*.dll` files inside the ZIP. Versions up to 0.5.502.1 were not signed.
+
+Signing does not stop SmartScreen from warning about a new release. SmartScreen also weighs how much download history a file has, so for a fresh version Windows may still show "Windows protected your PC" until that version has been downloaded often enough. What signing changes is the warning itself: Windows names `Gregor Dadera` as the publisher instead of an unknown publisher. To continue:
 
 1. Choose `More info`.
 2. Choose `Run anyway`.
 
-This is expected and applies to the installer as well as to `gui\aicb-ui.exe` and `cli\aicb.exe` from the ZIP. The same note is in the `LIESMICH.txt` that ships with the ZIP.
+This applies to the installer as well as to `gui\aicb-ui.exe` and `cli\aicb.exe` from the ZIP. The same note is in the `LIESMICH.txt` that ships with the ZIP.
+
+To check the signature yourself, right-click the file, choose `Properties` and open the `Digital Signatures` tab: it lists `Gregor Dadera` as the signer, and `Details` shows whether the signature is valid. One of the files listed above, from version 0.5.503.1 on, without that tab or with another signer is not the published file. The .NET runtime and library files beside them carry their own publishers' signatures.
+
+The NuGet package of the .NET tool is signed by nuget.org, as before; nothing changes for the .NET tool.
 
 ## 2.8 Verifying your download
 

@@ -92,9 +92,11 @@ From the [latest release](https://github.com/gregordadera/aicb-roslyn-mcp/releas
   administrator rights: `gui\aicb-ui.exe` is the desktop app, `cli\aicb.exe` the CLI.
   Uninstall = delete the folder.
 
-The files are **not code-signed yet**. Windows SmartScreen therefore shows *"Windows
-protected your PC"*; choose *More info → Run anyway*. The release notes list a
-SHA-256 checksum for every file, so you can verify what you downloaded:
+The installer and the programs are **code-signed** (publisher: Gregor Dadera; right-click
+a file, *Properties*, tab *Digital Signatures*). Windows SmartScreen can still show
+*"Windows protected your PC"* for a new release until it has enough download history;
+choose *More info -> Run anyway*. The release notes list a SHA-256 checksum for every
+file, so you can verify what you downloaded:
 
 ```powershell
 Get-FileHash .\AIContextBuilder-Setup-<version>.exe -Algorithm SHA256

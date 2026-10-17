@@ -173,7 +173,7 @@ aicb call batch --sln C:/repo/App.sln --arg queries='[{"tool":"find_usages","arg
 
 **How an argument is resolved.** In this order: an explicit `--arg name=value`; the accepted alias spelling of that tool (see below; the real name always wins); for `sessionId` and `solutionPath` only, the value of `--sln`; the parameter's default; otherwise an error of the form `missing required argument '<name>': pass --arg <name>=<value>` (plus `(or --sln <path>)` for a session parameter). A `--arg` token without `=` is a user error.
 
-**How a value is converted.** `string`, `bool`, `int`, `long`, `double`, `enum` (case-insensitive) and `string[]` (a JSON array or a comma-separated list) are read directly. Any other type is deserialized from JSON with the same options as `tools/call`, which is how a complex argument such as `batch`'s `queries` can be passed as `--arg queries='[…]'`. Numbers are read with the invariant culture: write `0.6`, not `0,6`. A decimal comma is rejected with a hint naming the cause, because on a German, French or Spanish desktop `0,6` looks perfectly well formed.
+**How a value is converted.** `string`, `bool`, `int`, `long`, `double`, `enum` (case-insensitive) and `string[]` (a JSON array or a comma-separated list) are read directly. Any other type is deserialized from JSON with the same options as `tools/call`, which is how a complex argument such as `batch`'s `queries` can be passed as `--arg queries='[...]'`. Numbers are read with the invariant culture: write `0.6`, not `0,6`. A decimal comma is rejected with a hint naming the cause, because on a German, French or Spanish desktop `0,6` looks perfectly well formed.
 
 **Output and exit codes.** A string result is printed unchanged; anything else is serialized as JSON. The result goes to **stdout**, so it can be piped or inspected. Diagnostics and warnings go to **stderr** - including the progress of `analyze_solution`, which has no client to notify here and therefore reports on stderr. Exit codes: `0` success, `1` user error (unknown tool, missing or invalid argument, the tool's own actionable error), `2` unexpected failure, `3` cancelled.
 
@@ -270,7 +270,7 @@ Many list answers come as `{ items, count, totalFound, truncated }`. `count` is 
 
 ### `nearest`
 
-When a name resolves to nothing, many tools add a `nearest` suggestion - the closest declared name, or a declared name the query only begins - instead of returning a bare empty list. That distinguishes "you misspelled it" from "this symbol really has no matches". It is present on `find_symbol`, `symbol_signature`, `find_usages`, `impact_of_change`, `symbol_metrics`, `instantiation_sites` and `resolve_injection`, and as a `hint` on `get_type_hierarchy` and `find_implementations`.
+When a name resolves to nothing, many tools add a `nearest` suggestion - the closest declared name, or a declared name the query only begins - instead of returning a bare empty list. That distinguishes "you misspelled it" from "this symbol really has no matches". It is present on `find_symbol`, `symbol_signature`, `find_usages`, `impact_of_change`, `symbol_metrics`, `instantiation_sites`, `get_type_hierarchy` and `resolve_injection`, and as a did-you-mean inside the `hint` of `find_implementations`.
 
 ### `note`
 
@@ -279,6 +279,8 @@ A leading `note` field qualifies an answer that would otherwise be misread - abo
 ### `incompleteProjects`
 
 If the analysis run could not resolve a project's references, a `note` leads **every** answer of the fan-in family, non-empty ones included: such a run is short by ordinary edges. The cross-check is `get_diagnostics`, which reports the affected projects as `incompleteProjects` together with their suppressed-diagnostic counts and their dependent projects.
+
+A narrower qualifier of the same kind is `generatedCodeNote`. It appears when a source generator or the WPF markup compiler did not run in the project that declares the answer's subject, or in a project depending on one, and it names the generators that did not run together with the repair `get_diagnostics` gives for its `generatedCodeGaps`. It rides on populated answers as well. It is carried by `find_usages`, `impact_of_change` (ahead of `risk`), `instantiation_sites`, `find_tests_for`, `find_implementations` (on an empty answer also when generated code is missing below the interface's project) and `get_type_hierarchy`. `find_dead_code` marks each candidate in such a project with `missingGeneratedCode: true` and counts them in its `generatedCodeNote` - treat them as unjudged, not as dead. `find_symbol` and `symbol_signature` add the sentence to `generatedSourcesNote` on a zero hit.
 
 ### Recall safety
 

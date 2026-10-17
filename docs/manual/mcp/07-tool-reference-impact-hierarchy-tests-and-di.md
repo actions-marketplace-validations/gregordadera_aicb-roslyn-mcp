@@ -40,7 +40,7 @@ The tools in this chapter answer four groups of questions:
 
 | Query | `resolvedKind` | Answer |
 |---|---|---|
-| Type name | `type` | The types that reference it. |
+| Type name | `type` | The types that reference it, plus markup views and `.razor` files. A doc `cref` counts (unmarked), and so does an attribute application at any position; an assembly- or module-level attribute is credited to the file that applies it, as `<file> (assembly)` or `<file> (module)`. |
 | Method name | `method` | The methods that call it (the union across overloads). |
 | Property or field name | `property` / `field` | The methods that read or write it. A CommunityToolkit `[ObservableProperty]` backing field additionally lists the consumers of its generated property - the two are one symbol pair to a caller. |
 | Event name | `event` | The methods that raise, subscribe to or unsubscribe from it. The subscriber types are also available through `find_by_event_subscription`. |
@@ -54,13 +54,13 @@ The tools in this chapter answer four groups of questions:
 { "sessionId": "<session>", "symbol": "OrderService.Cancel" }
 ```
 
-**Response.** `symbol`, `resolvedKind`, an optional `note`, and `usedBy` - a capped envelope (`items`, `count`, `totalFound`, `truncated`, maximum 100). Each item is an object `{name, file, line}`:
+**Response.** `symbol`, `resolvedKind`, an optional `note`, and `usedBy` - a capped envelope (`items`, `count`, `totalFound`, `truncated`, maximum 100). Each item is an object `{name, file, line}`, one per user, so `totalFound` counts users:
 
 - `name` - the user: a calling member under its full key with parameter types, a referencing type, or a markup view.
 - `file` - the file the user is declared in, relative to the solution and with forward slashes.
 - `line` - the line the user's declaration starts on in that file (its first attribute line when attributes precede it), not the line of the reference. A field, property or event whose initializer uses the symbol is placed by that member's declaration.
 
-A type declared in several files - a partial type, or same-named types the answer merges - lists them in `files` as `[{file, line}]` objects instead of `file` and `line`. Markup and top-level entries carry a `file` but no `line`, and an item that no recorded fact places carries neither: absent means unknown, never a guess. A script written for earlier releases, whose items were bare strings, reads `name`.
+A partial type declared in several files lists them in `files` as `[{file, line}]` objects instead of `file` and `line`. Where one name stands for several users - two types of one simple name in different namespaces, the same type or caller compiled in two projects - each declaration is its own item under the shared `name`, and the items add `fullName` (for a type), plus `project` where the full name or the caller is shared too. A lone item carries neither. Markup and top-level entries carry a `file` but no `line`, and an item that no recorded fact places carries neither: absent means unknown, never a guess. A script written for earlier releases, whose items were bare strings, reads `name`.
 
 ```json
 {
@@ -90,14 +90,14 @@ Depending on the answer, additional steering fields appear:
 - `selfReferences` - how many of the listed users of a member sit on its own type.
 - `textuallyInvisibleUsers`, `textualBindingKinds`, `textualBindingNote` - see below.
 
-**`not_found` is not "undeclared".** A delegate type and a qualified or nested type name (`Outer.Inner`) answer `not_found` too. Where the declarations can explain the miss, a `note` says why: a member asked on a type that does not declare it (the note names the types that do), or a declared type named by a qualified form, namespace-qualified or nested (the note names the simple name to ask for).
+**`not_found` is not "undeclared".** A delegate type and a qualified or nested type name (`Outer.Inner`) answer `not_found` too. Where the declarations can explain the miss, a `note` says why: a member asked on a type that does not declare it (the note names the types that do), a declared type named by a qualified form, namespace-qualified or nested (the note names the simple name to ask for), or a Blazor component written only in a `.razor` file (the note names its file; it does not list the component's users).
 
 **Empty answers.** A real kind with an empty `usedBy` means the symbol exists but no intra-solution reference was recorded. That is not proof of dead code, and the `note` that leads the answer names the ways a real use can escape the index and a cross-check you can run:
 
-- **Markup:** `{Binding}` root paths in both markup-extension and element syntax (low-confidence, tagged `(xaml)`, attributed to the resolved view-model), `Click="Handler"` event wires, `{x:Static}` members, attached-property read accessors, `{TemplateBinding}` members and markup type references. A view-model reached only through a `d:DesignInstance` design hint or the `FooView` → `FooViewModel` naming convention records its member edges but not its type edge, so a view-model rename can still read as low-risk.
+- **Markup, beyond the recorded forms.** Recorded in XAML are `{Binding}` root paths in both markup-extension and element syntax (low-confidence, tagged `(xaml)`, attributed to the resolved view-model); event wires in WPF `.xaml` - an attribute that names an event the element's type or one of its bases declares, or an attached `Owner.Event`, credited to its handler, a `void` method with two parameters (where the element's type cannot be resolved, only `Click` counts; Avalonia `.axaml` event wires are not recorded); property sites in WPF `.xaml` - an attribute or property element that sets a property, an attached `Owner.Member` (also under a URI-mapped prefix), and the `Property` of a `Setter`, `Trigger` or `Condition`, credited to the property, or to `SetX`/`GetX` for an attached property; `{x:Static}` members, attached-property read accessors, `{TemplateBinding}` members and markup type references. Recorded in `.razor` files are members named in `@code` blocks, in code-block statements and in component-parameter values (a value without `@` only where the parameter's type is known and is not `string`), and a call through an injected member (`@inject`, `[Inject]`) or through the component's own field or property, credited to the member on that member's type. A view-model reached only through a `d:DesignInstance` design hint or the `FooView` -> `FooViewModel` naming convention records its member edges but not its type edge, so a view-model rename can still read as low-risk.
 - **C# `nameof`** of a method (a `nameof` of a type is recorded).
 - **Activation by name at runtime:** reflection, a container resolving by convention.
-- **Source-generated code:** generated documents are not walked, so a generator's output records no edge on what it calls.
+- **Source-generated code:** generated documents are not walked, so a generator's output records no edge on what it calls. Committed `*.Designer.cs` and `*.g.cs` files outside build output are not affected: they are read like any other source file.
 - **Enum members only:** values that arrive as strings or numbers (`Enum.Parse`/`TryParse`, JSON or database deserialization, a XAML attribute literal, a command-line argument) and attribute arguments on a type, property or field.
 - **Events only:** a subscription made through an interface lands on the interface's event, not the class's (the bare name unions both); a handler added by name (`WeakEventManager.AddHandler(src, nameof(E), ...)`, reflection `AddEventHandler`) or wired in markup leaves no edge.
 - **Operators only:** a `dynamic` operand, bound at run time; a call by name through reflection; the operator `true` or `false` behind a user-defined `&&` or `||`; the element operators of a tuple comparison `(a, b) == (c, d)`; and a conversion that a `foreach` applies to its elements, a compound assignment to its operand or result, or `??` to its right side.
@@ -118,6 +118,8 @@ The cross-checks the note suggests: for a member, run the fan-in query on its de
 
 **Run-wide qualification.** If the analysis run could not resolve every project's references, a `note` leads every answer of this family - including a populated one - because such a run is short by ordinary references, not only exotic ones. Rebuild and call `refresh_session`, then repeat the query.
 
+**A generator that did not run.** When the symbol is declared in a project where a source generator or the WPF markup compiler did not run, or in a project that depends on one, the answer carries `generatedCodeNote` - on a populated answer too, because the list is then short by ordinary references. See "Recurring conventions across the catalog".
+
 ### `impact_of_change`
 
 **Purpose.** Estimate the blast radius of changing a symbol: the direct and the transitive fan-in (who depends on it, directly or through chains) plus a risk level. This is the call to make before you refactor or rename shared code.
@@ -133,12 +135,12 @@ The cross-checks the note suggests: for a member, run the fan-in query on its de
 | `sessionId` | string | yes | - | Session id, or an absolute `.sln` path for self-init. |
 | `symbol` | string | yes | - | The same strings `find_usages` accepts - a user-defined operator by its metadata name included - except the constructor form `Type.Type`, which is not resolved here (use `find_usages`). A type takes its simple name only. |
 
-**Response.** `symbol`, `resolvedKind`, an optional `note`, `directCount`, `transitiveCount`, `risk`, `productionImpactCount`, `directImpact` (capped envelope, maximum 20 entries), the textual-binding fields described under `find_usages`, and `nearest` on an unresolved name. Where they apply: `saturation`, `viaContract` and `viaContractNote`, `implementers`, `riskBasis` and `collision`.
+**Response.** `symbol`, `resolvedKind`, an optional `note`, `directCount`, `transitiveCount`, `risk`, `productionImpactCount`, `directImpact` (capped envelope, maximum 20 entries), the textual-binding fields described under `find_usages`, and `nearest` on an unresolved name. Where they apply: `saturation`, `viaContract` and `viaContractNote`, `implementers`, `riskBasis`, `collision` and `generatedCodeNote` (ahead of `risk`; see "Recurring conventions across the catalog").
 
 | Field | Meaning |
 |---|---|
-| `directCount` | Number of symbols that reference the target directly. Includes test-project callers. |
-| `transitiveCount` | Number of symbols in the full transitive closure. Includes test-project callers. |
+| `directCount` | Number of direct users, counted one per declaration exactly as `find_usages` lists them (its `totalFound`). Includes test-project callers. |
+| `transitiveCount` | Number of dependents in the full transitive closure, one per declaration: where several types or callers share a name, each declaration is its own node, and a dependent is followed to the declaration it refers to where that can be told. Includes test-project callers. |
 | `productionImpactCount` | The non-test part of the transitive closure. |
 | `risk` | `none`, `low`, `medium` or `high`. |
 | `directImpact` | The direct users, as items `{name, file, line}` exactly as in `find_usages` (a type declared in several files lists `files` as `[{file, line}]`). |
@@ -182,12 +184,12 @@ A script written for earlier releases, whose `directImpact` items were bare stri
 
 The risk counts dependents, not what the change means.
 
-**Implementers.** An `implementers` entry for an interface or abstract **method** lists the implementing and overriding members; `typeCount` counts the types they sit on, which is what a change to one overload breaks. When the member name is declared by two same-named interfaces or abstract classes in different namespaces, the entry keeps their combined count and `namesakes` names each contract with its own implementing types. An entry for an interface or abstract **type** has one entry per declaration (namesakes in different namespaces and generic interfaces of different arity stay apart) and lists the implementing or deriving types, including those that implement the interface through a base class, as `find_implementations` lists them; the ones that reach it only through a base class are listed again under `indirect` and do not raise the risk. When no production code calls the interface or abstract member - or, for a type, no production type references it - `riskBasis.note` says that the risk comes only from its implementing types; the risk level itself is unchanged by the note. Where `saturation` grades the closure by its direct users, its note names the implementing types added to that count.
+**Implementers.** An `implementers` entry for an interface or abstract **method** lists the implementing and overriding members; `typeCount` counts the types they sit on, one per declaration (two same-named types in different projects count twice), which is what a change to one overload breaks. When the member name is declared by two same-named interfaces or abstract classes in different namespaces, the entry keeps their combined count and `namesakes` names each contract with its own implementing types. An entry for an interface or abstract **type** has one entry per declaration (namesakes in different namespaces and generic interfaces of different arity stay apart) and lists the implementing or deriving types, including those that implement the interface through a base class, as `find_implementations` lists them; the ones that reach it only through a base class are listed again under `indirect` and do not raise the risk. When no production code calls the interface or abstract member - or, for a type, no production type references it - `riskBasis.note` says that the risk comes only from its implementing types; the risk level itself is unchanged by the note. Where `saturation` grades the closure by its direct users, its note names the implementing types added to that count.
 
 **Notes.**
 
 - `risk: "none"` on a solution that has production projects does not by itself carry a note for a symbol used only by tests: `directCount` is then greater than 0 while the risk is `none`. That class is reported by `find_production_dead`, which is outside the default tool set.
-- On an unresolved name the answer leads with a note stating that the numbers measure nothing and that `risk: "none"` is the absence of a measurement, not a safe verdict. A mistyped name and a genuinely dependency-free symbol produce the identical answer.
+- On an unresolved name the answer leads with a note stating that the numbers measure nothing and that `risk: "none"` is the absence of a measurement, not a safe verdict. A mistyped name and a genuinely dependency-free symbol produce the identical answer. Where the declarations explain the miss, the note says why, as in `find_usages` - including a Blazor component written only in a `.razor` file.
 - A resolved symbol with `directCount` 0 carries the escapes note described under `find_usages`.
 - If every project in the solution classifies as a test project **and** `productionImpactCount` is 0, a note says so; read `directCount`/`transitiveCount` instead. The count is not structurally forced to zero: unresolved keys and markup fan-in labels can still be classified as production impact.
 
@@ -327,7 +329,7 @@ The risk counts dependents, not what the change means.
 
 ### `find_implementations`
 
-**Purpose.** List the types that implement an interface.
+**Purpose.** List the types that implement an interface, whether the interface is declared in the solution or external (`IDisposable`, `IEquatable`).
 
 **When to use it.** Before changing an interface, to see every implementer that must be updated; when you want to know whether an interface has one production implementation or many.
 
@@ -338,17 +340,20 @@ The risk counts dependents, not what the change means.
 | Parameter | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `sessionId` | string | yes | - | Session id, or an absolute `.sln` path for self-init. |
-| `interfaceName` | string | yes | - | The interface's simple name. An arity suffix in metadata or declaration form - `IConsumer`1` or `IConsumer<T>`, or `IConsumer`0` for the non-generic namesake - filters to that arity; a bare name keeps the merged view over all arities. Aliases: `symbol`, `interface`. |
+| `interfaceName` | string | yes | - | The interface's simple name. An arity suffix in metadata or declaration form - `IConsumer`1` or `IConsumer<T>`, or `IConsumer`0` for the non-generic namesake - filters to that arity; a bare name keeps the merged view over all arities. A concrete type argument (`IConsumer<OrderPlaced>`) keeps only the types that close the interface with that argument. Case-sensitive; a namespace-qualified name matches nothing, and two interfaces sharing a simple name answer as one list. Aliases: `symbol`, `interface`. |
 | `includeTests` | bool | no | `false` | Include test-project implementers. |
 
-**Response.** An optional leading `note` (set when the analysis run could not resolve all project references), the item list in the shared capped envelope (`items`, `count`, `totalFound`, `truncated`, maximum 100), an optional `hint`, and `testImplementationsFiltered`.
+**Response.** An optional leading `note` (set when the analysis run could not resolve all project references), the item list in the shared capped envelope (`items`, `count`, `totalFound`, `truncated`, maximum 100, sorted by name), an optional `hint`, an optional `generatedCodeNote`, `testImplementationsFiltered`, and `typeArgumentFilter` on a closed query.
 
-Each item carries `name`, `isAbstract`, `kind` (`class`, `struct`, `record` or `interface`) and `isTestProject`, so an abstract base or a test fake is distinguishable from a concrete production implementer. A generic implementer additionally carries `declaration`, its arity-qualified form such as `PolicyWrap<TResult>`, so a generic and a non-generic pair sharing name and namespace stay distinguishable. An item whose only evidence is the interface's back-edge membership carries `via: "back-edge"`.
+Each item carries `name`, `isAbstract`, `kind` (`class`, `struct`, `record` or `interface`), `isTestProject` and, where known, `namespace`, so an abstract base or a test fake is distinguishable from a concrete production implementer. A generic implementer additionally carries `declaration`, its arity-qualified form such as `PolicyWrap<TResult>`, so a generic and a non-generic pair sharing name and namespace stay distinguishable. `via` says how an item was found when it is not by an interface the type itself declares: `via: "back-edge"` marks an item known only from the interface's own implementer list, `via: "inherited"` a type that gets an external interface through a base class or interface declared in the solution.
+
+**Closed queries.** A query with a concrete type argument (`IHandler<Saved>`) lists the types that close the interface with those arguments, also through base classes and generic interfaces. A position written as a type parameter (`T`, or the name the interface itself declares there) is a placeholder, so `IHandler<T>` and the metadata form keep the arity answer. `typeArgumentFilter` reports `typeArguments` and counts the arity-matching types - test projects included - that were left out because they close the interface otherwise (`otherClosings`) or only over their own type parameters (`openClosings`), and how many stayed with an unreadable closing (`unresolved`). Such an item stays in the list, marked `closing: "unresolved"`.
 
 **Notes.**
 
 - Test-project implementers are excluded by default. When that filter removed something, `testImplementationsFiltered` reports how many - a short list is never silently short. Set `includeTests: true` to see them.
-- An empty result carries a `hint` in two cases: when the name is a class rather than an interface (the hint points to `get_type_hierarchy` and `find_overrides`), and when the name is not declared in the solution at all (the hint says so and carries a did-you-mean when one is close enough). An empty list is a statement about the name, not about implementers.
+- An empty result carries a `hint` in two cases: when the name is a type that is not an interface (the hint points to `get_type_hierarchy` and `find_overrides`), and when no type in the index carries the name at all (the hint says so and carries a did-you-mean when one is close enough; a delegate counts as undeclared). An empty list is a statement about the name, not about implementers.
+- `generatedCodeNote` flags a source generator that did not run in the interface's project, as on the other declaration tools (see "Recurring conventions across the catalog"). On an empty result it also appears when a generator that did not run may have added the interface below it - in a project that uses the interface's project, or in any project for an interface the solution does not declare.
 
 **Example**
 
@@ -396,14 +401,14 @@ Each item carries `name`, `isAbstract`, `kind` (`class`, `struct`, `record` or `
 | `sessionId` | string | yes | - | Session id, or an absolute `.sln` path for self-init. |
 | `typeName` | string | yes | - | The type's exact (case-sensitive) simple name. Add an arity suffix - `Repository<T>` or `Repository`1` - to address a generic type unambiguously when a generic and a non-generic type share the name. Alias: `symbol`. |
 
-**Response.** `type`, `resolvedKind`, an optional `note` (the run-wide qualification), an optional `hint`, `mergedNamesakes`, `separatedNamesakes`, `mergedArities`, `baseChain`, `interfaces`, and `derivedTypes` (a capped envelope, maximum 100).
+**Response.** `type`, `resolvedKind`, an optional `note` (the run-wide qualification), an optional `hint`, an optional `generatedCodeNote`, `mergedNamesakes`, `separatedNamesakes`, `mergedArities`, `baseChain`, `interfaces`, `derivedTypes` (a capped envelope, maximum 100) and, on `not_found`, a trailing `nearest`.
 
 - `baseChain` lists the base-class chain upward, nearest base first. When the chain leaves the solution, the last entry names the external base, for example `ObservableObject (external)`. A base type outside the solution that only shares its simple name with a type inside it ends the chain as external.
-- `interfaces` lists the type's implemented interfaces; for an interface query these are its base interfaces.
-- `derivedTypes` lists transitively derived types; each entry reads `Derived : DirectBase`, so the subtree structure is preserved in the flat list.
-- Every link is rendered arity-qualified, so a same-name generic and non-generic type are distinguishable. A link between two types of the same simple name - a type deriving from a same-named type in another namespace - is kept in both directions and written with full names, for example `Ef.User : Core.User`.
+- `interfaces` lists the interfaces the type itself declares - one inherited through a base class is not repeated; for an interface query these are its base interfaces.
+- `derivedTypes` lists transitively derived types, one entry per type (partial fragments and the instances of a multi-targeted project stay one entry, and `totalFound` counts types); each entry reads `Derived : DirectBase`, so the subtree structure is preserved in the flat list. Test-project types are included and not marked.
+- Every link is rendered arity-qualified, so a same-name generic and non-generic type are distinguishable. Types sharing a simple name are written by full name, for example `Ef.User : Core.User`, and where the full name is shared too - the same type in two projects - the project follows in brackets (`Extensions [MyApp.Web] : ExtensionsBase`). A link between two types of the same simple name is kept in both directions.
 - `mergedArities` is set when a bare name matches a generic type and its non-generic namesake: the view merges them, and the field says whose base chain is shown.
-- `resolvedKind: "not_found"` means no type of that name is in the solution.
+- `resolvedKind: "not_found"` answers three empty lists: no type of that name is declared in the solution - also for an external base, a delegate type, a namespace-qualified name, a nested `Outer.Inner` form, or an arity suffix no declaration has. A trailing `nearest` then gives a close declared type name, for a qualified form the simple name.
 
 **Notes.**
 
@@ -639,9 +644,9 @@ The entries are marked rather than filtered out, because a deep transitive path 
 
 ### `resolve_injection`
 
-**Purpose.** Resolve a `Microsoft.Extensions.DependencyInjection` registration: given an interface, return the concrete implementation or implementations registered for it, the lifetime, and where the registration happens - `location` (the `Add*` call as file and line), `project` and `declaringMethod`.
+**Purpose.** Resolve a `Microsoft.Extensions.DependencyInjection` registration: given a service type - an interface, or a class registered as itself - return what is registered for it, the lifetime, and where the registration happens - `location` (the registering call as file and line), `project` and `declaringMethod`.
 
-**When to use it.** When you need to know which implementation is wired for an interface, which lifetime applies, or where a registration lives; when a fan-in or instantiation answer suggests a container registration.
+**When to use it.** When you need to know which implementation is wired for an interface, which lifetime applies, or where a registration lives; when a fan-in or instantiation answer suggests a container registration. It does not answer usage (`find_usages`), implementers (`find_implementations`) or construction (`instantiation_sites`).
 
 **Availability.** Default tool set. Note: this tool needs a live analyzed session; a session restored from a saved snapshot cannot answer it.
 
@@ -650,32 +655,50 @@ The entries are marked rather than filtered out, because a deep transitive path 
 | Parameter | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `sessionId` | string | yes | - | Session id, or an absolute `.sln` path for self-init. |
-| `interface` | string | yes | - | The interface's simple or fully qualified name, for example `ICodeAnalyzer`. Aliases: `symbol`, `interfaceName`. |
+| `interface` | string | yes | - | The service type's simple or fully qualified name, for example `ICodeAnalyzer`. A closed generic form (`IHandler<Saved>`) lists only the registrations serving that closing, together with the open registrations (`IHandler<>`) that serve every closing; `IHandler` or `IHandler<T>` lists every closing. Aliases: `symbol`, `interfaceName`. |
 | `site` | string | no | `null` | Narrow to registrations whose file path contains this substring. |
 | `includeTests` | bool | no | `false` | Include registrations declared in test projects. |
 
-**What is scanned.** `AddSingleton`, `AddScoped` and `AddTransient`, their `TryAdd*` variants, and project-local wrappers whose name ends in a lifetime, such as `AddCachedSingleton` - in generic, `typeof`, instance and factory-lambda form. Plus exactly one data-driven shape: a `foreach` over a static table of `new(typeof(Service), typeof(Impl))` rows is expanded into one registration per row, also when the table lives in another project. Such a registration carries the note `table row <file>:<line>`.
+**What is scanned.** `AddSingleton`, `AddScoped` and `AddTransient`, their `TryAdd*` variants and keyed forms - in generic, `typeof`, instance and factory-lambda form. Beyond these:
 
-A call whose service type is a runtime value - reflection or assembly scans, a method result, a deconstructed loop variable - is not expanded, and neither is a factory lambda whose product cannot be named. Instead the response leads with a `note` naming those sites and which of the two kinds each one is. An empty list with such a note means "not statically visible", not "not registered".
+- **Project-local registration helpers.** A helper declared in the solution that registers its own type arguments is followed into its body, whatever its name - a wrapper such as `AddCachedSingleton` as well as an `AddHandler<TEvent, THandler>()`. Each call of the helper is read with its own type arguments, and such a row carries the note `via <helper>`. A generic the helper builds over its type parameter is closed with the call's arguments; a keyed call inside the helper takes each call's own key (a key the helper computes from what it is handed reads `(dynamic)`); a factory lambda names its product where the body shows one type. Where a call read through the helper is in view, the helper's own body line is not listed again, and two identical `TryAdd`s that one call reaches under the same key are one row.
+- **Service descriptors built at the call.** `Add`, `TryAdd`, `TryAddEnumerable` and `Replace` on the service collection, handed a `ServiceDescriptor` the call shows being built: in place (`new ServiceDescriptor(...)`, `ServiceDescriptor.Singleton`/`Scoped`/`Transient`/`Describe` and the keyed factories), in a local that is not written again, or as the elements of the collection a `TryAddEnumerable` takes (one row per element). A row from `TryAdd`, `TryAddEnumerable` or `Replace` is noted with that name; a plain `Add` carries no such note.
+- **`AddHostedService<T>()`** and its factory overload: `IHostedService` implemented by `T`, Singleton, note `AddHostedService`.
+- **Package helpers with an `As` chain.** A package extension such as `AddSingletonAs<T>()`, whose body the analysis does not read, followed by `.As<I>()` or `.AsSelf()`, is read from its call shape alone: it registers `I` (or `T` for `AsSelf()`), implemented by `T`, with the lifetime its name says. Such a row carries the note `inferred, not read: ...` naming the helper and its assembly, and the answer says once which helpers were read this way and that what else they register - and whether they add, try to add or replace - is not known.
+- **One data-driven shape:** a `foreach` over a static table of `new(typeof(Service), typeof(Impl))` rows is expanded into one registration per row, also when the table lives in another project. Such a registration carries the note `table row <file>:<line>`.
+
+**What is not read:** a `ServiceDescriptor` that is not built at the call or in a local there (a parameter, a loop variable, a method result, a conditional, a reassigned local, a collection held in a local, a spread element), framework helpers that register on the caller's behalf (`AddHttpClient`, `AddDbContext` and the like), Scrutor assembly scans, and Autofac, Castle Windsor and other non-Microsoft containers.
+
+A call whose service type is a runtime value - reflection or assembly scans, a method result, a deconstructed loop variable - is not expanded, and neither is a factory lambda whose product cannot be named. Instead a `note` names those sites and which kind each one is. A site that demonstrably cannot register the queried service - for example one that registers a class as itself while the query is an interface - is left out of that list and only counted with its reason. An empty list with such a note means "not statically visible", not "not registered".
 
 A factory that *returns* its object is resolved: both `sp => Foo.Build()` and a block body whose `return` statements all agree on one type. Where they disagree, or where there is no `return` at all, the product stays unnamed and the site is disclosed rather than guessed at. A `return` inside a nested lambda or local function belongs to that function, not to the factory.
 
-**Response.** `query`, `matchCount`, `ambiguous`, `multiRegistration`, `registrationSites`, `consumedAsCollection`, `testRegistrationsFiltered`, and `registrations`. Each registration carries `serviceType`, `implementationType`, `lifetime` (`Singleton`, `Scoped` or `Transient`), an optional `note`, `location` (file and line of the `Add*` call), `project`, `declaringMethod` (`Type.Method`; null for top-level statements), `key` for a keyed registration (omitted otherwise) and `isTestProject` when the registration comes from a test project. A keyed call (`AddKeyedSingleton<IFoo, Foo>("k")`, also the non-generic `AddKeyedSingleton(typeof(IFoo), "k", typeof(Foo))`) keeps its key: two keys are two services.
+**Response.** `query`, `matchCount`, `ambiguous`, `multiRegistration`, `registrationSites`, `consumedAsCollection`, `testRegistrationsFiltered`, and `registrations`. On a closed query the answer adds `typeArgumentFilter`. Each registration carries `serviceType`, `implementationType`, `lifetime` (`Singleton`, `Scoped` or `Transient`), an optional `note`, `location` (file and line of the registering call), `project`, `declaringMethod` (`Type.Method`; null for top-level statements), `key` for a keyed registration (omitted otherwise) and `isTestProject` when the registration comes from a test project. `serviceType` carries its type arguments - `IDisplayDriver<ISite>`, `IHandler<>` for an open registration, `IHandler<TModel>` where a type parameter of the surrounding code fills it - while `implementationType` is a simple name, the service itself for a self or instance registration. A keyed call (`AddKeyedSingleton<IFoo, Foo>("k")`, also the non-generic `AddKeyedSingleton(typeof(IFoo), "k", typeof(Foo))`) keeps its key: two keys are two services, and so are two closings (`IRepo<A>`, `IRepo<B>`).
+
+Rows noted `inferred, not read` count as rows - in `matchCount`, `multiRegistration`, `registrationSites` and the closed-query filter - but not as evidence about how the helper adds: they take no part in `ambiguous`, never name an `effectiveRegistration` winner, and never make an optional dependency read `yes`.
 
 | Field | Meaning |
 |---|---|
 | `registrationSites` | How many distinct registration sites matched. |
 | `multiRegistration` | Whether more than one registration matched at all. |
 | `consumedAsCollection` | True when the service is consumed as a collection somewhere - a `GetServices<T>()` or `GetServices(typeof(T))` call, or an `IEnumerable<T>`-family or `T[]` constructor parameter, optional and nullable ones included. Several registrations are then a deliberate multi-binding. Consumers declared in test projects count only under `includeTests`, exactly as the registration list does. |
-| `ambiguous` | Judged within one registration site - one declaring method, or the file outside any method: true only when that site registers more than one distinct, statically resolvable implementation and `consumedAsCollection` is false. Across sites it is deliberately not ambiguity: a solution with several hosts (GUI, CLI, MCP) registers the same service once per host, and those containers never meet. Use `registrationSites`, `multiRegistration` and the per-registration `declaringMethod` to judge the case this grain cannot see: two helper methods composed by the same host. |
-| `effectiveRegistration` | Present when two or more registrations match: `winner` is the registration a single-service resolve receives - the last one kept, with `TryAdd*` keeping nothing once the service is registered - read only where the order is certain, within one straight-line registration method. Otherwise `winner` is `null` and `reason` says why (for example several sites, a call inside a branch or loop, two types of one simple name). Keyed registrations are set aside, because a plain resolve never receives one. |
+| `ambiguous` | Judged within one registration site (one declaring method, or the file outside any method) and per service (per key and per closed service type): true only when that site registers more than one distinct, statically resolvable implementation and `consumedAsCollection` is false. Two rows that both add to the service's set (`TryAddEnumerable`, `AddHostedService`) are no conflict. Across sites it is deliberately not ambiguity: a solution with several hosts (GUI, CLI, MCP) registers the same service once per host, and those containers never meet. Use `registrationSites`, `multiRegistration` and the per-registration `declaringMethod` to judge the case this grain cannot see: two helper methods composed by the same host. |
+| `effectiveRegistration` | Present when two or more registrations match: `winner` is the registration a single-service resolve receives - the last one kept, with `TryAdd*` keeping nothing once the service is registered - read only where the order is certain, within one straight-line registration method. Otherwise `winner` is `null` and `reason` says why (for example several sites, a call inside a branch or loop, two types of one simple name, a `TryAddEnumerable`, `Replace` or `AddHostedService` with its rule named, or a row inferred from a package helper's call shape). A descriptor `Add`/`TryAdd` takes part in the order like `AddSingleton`/`TryAddSingleton`. Keyed registrations are set aside, because a plain resolve never receives one. |
+| `constructorConsumerCount` | How many types take the service as a plain constructor parameter - visibility, never a usage verdict. |
+| `optionalDependencies` | The constructors taking the service as an optional parameter, each judged `yes`, `no` or `unknown`. |
+| `typeArgumentFilter` | On a closed query only: `typeArguments`, `otherClosings` (registrations of the same name closed with other arguments, left out; `matchCount + otherClosings` is the answer to the bare name under the same filters), `unresolved` (rows whose closing the call does not fix, kept in the list) and a `note` saying which fields stay at the level of the bare name. |
 | `testRegistrationsFiltered` | How many registrations the default test filter removed. Omitted when nothing was hidden. |
 
 **The three empty answers are distinguishable.**
 
-1. A name that resolves to nothing - no declaration and no registration - carries `resolvedKind: "not_found"` and a `nearest` suggestion: a typo.
-2. On an unfiltered query (no `site`, and nothing removed by the test filter), a real name with no registration carries a `note` that states the reader's boundary: no `Microsoft.Extensions.DependencyInjection` (`Add*`/`TryAdd*`, keyed included) registration was found, which is not proof that nothing registers it - a `ServiceDescriptor` handed to the collection, framework helpers that register on the caller's behalf (`AddHttpClient`, `AddDbContext` and the like), Scrutor assembly scans, and Autofac, Castle Windsor and other non-Microsoft containers stay out of scope. When a scanned project references a foreign container assembly, the note names that sign instead, because its registrations are invisible here. With a `site` filter, an empty result can be blank.
-3. Everything was filtered out by the test filter, reported as `testRegistrationsFiltered: N`.
+1. A name nothing in the solution names - no declaration, no registration, no base list, parameter, type argument or `typeof` that writes it - carries `resolvedKind: "not_found"` and a `nearest` suggestion: a typo. A closed query whose name is registered with other closings is not `not_found`; its note names the closed form.
+2. A real name with no registration always carries a `note`. It states the reader's boundary - nothing was found, which means "not statically visible", never "not registered" - scoped to the answer's view (it says when registrations in test projects or outside the `site` filter were left out), and it names the forms that are not read together with which of them the solution actually holds:
+   - registration helpers whose body is not read - a package's, or one a source generator writes - by call count, pointing first at helpers from the assembly that declares the queried type or named after it, and at calls that pass the type or an implementer as a type argument;
+   - registration by convention: types marked `ITransientDependency`, `ISingletonDependency`, `IScopedDependency` or `[ExposeServices]` are counted, with a pointer to the types that name the service in their base list or in `[ExposeServices]` (a non-empty answer gets the pointer alone);
+   - calls whose service type is a runtime value, as described above;
+   - for an interface the solution does not declare, that the library declaring it may register it in code this scanner does not see;
+   - when a scanned project references a foreign container assembly, that sign, because its registrations are invisible here.
+3. Everything was filtered out by the test filter, reported as `testRegistrationsFiltered: N`; the note says how many were left out and that `includeTests: true` lists them.
 
 **Notes.**
 

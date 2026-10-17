@@ -79,9 +79,9 @@ That warning is a prediction, not a startup failure: the tools that need a loade
 
 **Symptom.** On first start of the installer or of the unpacked `aicb-ui.exe`, Windows shows "Windows protected your PC" and blocks the file.
 
-**Cause.** The delivered files are not code-signed.
+**Cause.** SmartScreen warns about a file that does not yet have enough download history. From 0.5.503.1 on the files are digitally signed by `Gregor Dadera`, so the warning names that publisher, but a new release can still trigger it until it has been downloaded often enough. Versions up to 0.5.502.1 were not signed at all, and the warning showed an unknown publisher.
 
-**What to do.** Choose `More info` and then `Run anyway`. The same instruction is in `LIESMICH.txt` next to the unpacked files and in the README of the public repository; every release also lists SHA-256 checksums for its files.
+**What to do.** Choose `More info` and then `Run anyway`. The same instruction is in `LIESMICH.txt` next to the unpacked files and in the README of the public repository. To make sure the file is genuine, check `Properties > Digital Signatures` for the signer `Gregor Dadera` (see "The Windows SmartScreen warning"); every release also lists SHA-256 checksums for its files.
 
 ### `Database is newer than this build`
 
@@ -285,6 +285,8 @@ dotnet build
 3. Repeat the query. `get_diagnostics` is the fastest check that the run is now complete: `incompleteProjects` should be empty.
 
 Note: a freshly cloned repository is the most common case. If the solution cannot be built on your machine (a missing targeting pack, for example), the alarm stays - and the answers stay marked as incomplete, which is exactly what the marking is for.
+
+Note: a solution that defines no `Any CPU` platform can stay incomplete after a build for another reason: the design-time build ran at a platform the build did not write. `get_diagnostics` names the platform used in its `designTimeBuildPlatform` field; set `designTimeBuildPlatform` in the solution's `.aicb.json` to the platform you build at, then call `refresh_session(force: true)` (see "The build platform").
 
 ### What `incompleteProjects` means for a number
 

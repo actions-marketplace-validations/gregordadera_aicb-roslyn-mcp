@@ -18,7 +18,7 @@ The fan-in and impact tools (`find_usages`, `impact_of_change`, ...), the qualit
 
 **Dispatch through `batch` and `measure`.** Tools marked as dispatchable below can be run as a sub-query of the `batch` and `measure` meta-tools; the others must be called directly.
 
-**Capped lists.** Many tools return `{ items, count, totalFound, truncated }`: `count` is the length of the delivered list, `totalFound` the true total. The caps in this chapter are 100 (`find_symbol`), 50 (`symbol_signature`), 200 (`get_diagnostics`, `describe_api_surface`) and 80 entries per macro section in `architecture_overview`, except that its type-to-layer map remains complete.
+**Capped lists.** Many tools return `{ items, count, totalFound, truncated }`: `count` is the length of the delivered list, `totalFound` the true total. The caps in this chapter are 100 (`find_symbol`), 50 (`symbol_signature`), 200 (`get_diagnostics`, `describe_api_surface`) and 80 entries per macro section in `architecture_overview`, whose layer map lists up to 2000 types and only per-layer counts above that.
 
 **`nearest`.** When a name resolves to nothing, several tools return the closest declared name instead of a bare empty list, so a typo is distinguishable from a symbol that genuinely has no matches.
 
@@ -224,7 +224,9 @@ In the lean projection each index entry is a bare name; with `detail: "full"` ea
 | `includeTests` | `bool` | no | `false` | Include test projects. |
 | `summaryOnly` | `bool` | no | `false` | Collapse ordinary macro sections to a count plus top-N entries instead of up to 80. The layer map becomes an aggregate with the total and one count per layer. |
 
-**Response.** Markdown. Macro sections are capped at 80 entries with a `+N more` truncation note, except for the layer map: the complete type-to-layer assignment is retained. This keeps most of a 200+-project monolith bounded without hiding its layer allocation. Method-level call graphs are deliberately omitted (use `call_graph` or `explain_symbol` for a specific symbol).
+**Response.** Markdown. Macro sections are capped at 80 entries with a `+N more` note. The layer map has its own bound: it lists every type up to 2000 types; above that it shows the total and one count per layer - never a sample - and its header names the bound and points to `export_markdown`, which keeps the full map. This keeps even a 200+-project monolith bounded. Method-level call graphs are deliberately omitted (use `call_graph` or `explain_symbol` for a specific symbol).
+
+**The `<TRUNCATION>` block.** When anything was cut, the document leads with a `<TRUNCATION>` block: how many sections were capped, how many entries are shown of how many in total, and one `SECTION: shown of total` row per capped section - a layer map reduced to counts appears as `LAYER_MAP: 0 of N`. Read it before the sections: each `+N more` line states one section's loss, never the whole. No block means nothing was cut.
 
 **Notes and limits**
 
@@ -312,6 +314,8 @@ The layer and test profiles travel with the session, so downstream tools do not 
 
 - **Progress.** A client that sends a progress token receives progress notifications during a long analysis. The progress channel is bound by the protocol, not a parameter you pass.
 - A load failure is translated into an actionable message rather than a generic invocation error. The most common cause is a project that targets a newer SDK/TFM or a platform SDK (Windows SDK, Windows App SDK, Aspire) that the analyzer's build host cannot load.
+- **What is read.** Every C# source file of the loaded projects, committed `*.Designer.cs` and `*.g.cs` files included; files in build output (a project's `obj/` and `bin/` folders and its intermediate and output directories) are not. A file named `AssemblyInfo.cs` is not read as source; the assembly-level attributes it applies still count as type references. A folder named `bin`, `obj` or `.vs` that *contains* the project - a checkout under `~/bin/repo`, say - is the checkout's location, not build output, so such a solution is analysed normally on every operating system.
+- **Platform.** The projects are loaded at the platform the sidecar key `designTimeBuildPlatform` names, if the solution file names it; without it, a solution that defines no `Any CPU` platform is loaded at the platform its default configuration builds its C# projects at, when they agree on one. `get_diagnostics` reports which (see there).
 - Writes session state only - no files, no database. Not dispatchable through `batch`/`measure`.
 
 ### `refresh_session`
@@ -375,11 +379,16 @@ Also call it with `force: true` after a restore or build that was meant to repai
 | `cascadeClassifiedCount` | How many of the listed diagnostics are cascade-classified fallout of an incomplete dependency (each such item carries `cascadeFromIncomplete: true`). |
 | `referenceBindingAdvisoriesSuppressed` | How many assembly-reference version-float advisories (`CS1701`/`CS1702`) were filtered out. |
 | `reliable` | `false` when a strict majority of scanned projects are incomplete. |
+| `generatedCodeGaps` | Code that a source generator or the WPF markup compiler writes is missing from a project. |
+| `designTimeBuildFailures` | MSBuild reported a failure loading a project (a warning reads alike); its compiler options may be incomplete. |
+| `unrestoredProjects` | Projects that resolve their core references but have unresolved-name errors (`CS0246`/`CS0234`) and no `project.assets.json` where their restore writes it: `unresolvedNameErrors`, a `note`, and `projects`, each with `project`, `searchedFrom` and `unresolvedNameErrors`. The note names the repair - `dotnet restore`, and on `NETSDK1147` `dotnet workload restore`. Nothing is removed from the counts. Omitted when no such project exists. |
+| `designTimeBuildPlatform` | The platform decision of the load: `platform`, `solutionConfiguration`, `solutionPlatforms`, `projectsAtOtherPlatform`, `blockers` and a `note`; `source: "sidecar"` when the sidecar decided, and `refusedSidecarPlatform` when the sidecar value was refused. When the sidecar names a solution platform that maps the projects to another platform name (for example `Win32` built at `x86`), the `note` says so. Present when the load chose a platform, could not choose one, or refused the sidecar's value; `platform` is absent when no single platform could be chosen. Omitted when the solution defines `Any CPU`, builds every C# project at AnyCPU, or could not be read, and the sidecar names no platform. See the note below. |
 
 **Notes and limits**
 
 - **Suppressed diagnostics are excluded** (`#pragma`, `[SuppressMessage]`), and a multi-targeted project that compiles the same source under several target frameworks reports each diagnostic once (deduplicated by id + location + message), not once per framework.
 - **Incomplete projects are disclosed, not listed.** A project whose compilation cannot resolve its core references (`System.Object` missing - a targeting pack not installed for that TFM, or an unrestored project) would otherwise flood with thousands of bogus cascade errors. It is not listed as findings but appears under `incompleteProjects`. A freshly created, never-built worktree reports *every* project there until it is built once - that is the unrestored state, not a defect, and one `dotnet restore` / `dotnet build` makes the fast gate work for the rest of the session.
+- **Design-time build platform.** A solution that defines no `Any CPU` platform is loaded at the platform its default configuration builds its C# projects at, when they agree on one; where they do not, each project is loaded at its own default platform (AnyCPU for an SDK-style project), the `note` says why, and `blockers` lists the projects that prevented a choice where there are such projects. To set the platform yourself, put `"designTimeBuildPlatform": "x64"` into the solution's `.aicb.json` sidecar - a platform as the solution's configuration manager names it, such as `x64`, `ARM64` or `Any CPU`. A value the solution file does not name (as a solution platform, or as a platform it maps a C# project to), or one under which the solution maps its projects to several platforms, is refused and disclosed, and the automatic choice applies. The value is read on every full reload, so after editing it call `refresh_session` with `force: true`; an unforced refresh after an edit of the sidecar alone keeps the platform the session was loaded at. Where failures or missing generated code may come from the platform, the notes say so and name a build of the affected projects with `-p:Platform=<platform>`.
 - The `inconclusive` verdict is deliberately rare: it fires only when a strict majority of projects are incomplete, because a judgment that triggers on every partly-restored solution is one you learn to ignore. The *disclosure* is not rationed the same way: whenever even one project is incomplete, the answer carries `incompleteRatio` and `suppressedDiagnosticsTotal` next to the counts.
 - **Read `suppressedDiagnosticsTotal` as a magnitude, not as one half of a ratio with `errorCount`.** The two are counted under different rules: the total spans every severity from the floor up and is *not* deduplicated (a multi-targeted incomplete project contributes once per target framework), while `errorCount` counts errors only and *is* deduplicated across target frameworks. A total that dwarfs `errorCount + warningCount + infoCount` means this measured a fraction of the solution, even when no verdict is present.
 - A core-resolved project whose dependency chain includes an incomplete project inherits the broken references and can list cascade ids although it compiles fine on a real build. Those diagnostics are never hidden: they stay listed, marked `cascadeFromIncomplete: true`, and counted in `cascadeClassifiedCount`, so `errorCount` is not read as "N real errors".
@@ -441,7 +450,7 @@ Also call it with `force: true` after a restore or build that was meant to repai
 
 **Aliases.** The tool schema advertises `query`, but `symbol` and `name` are accepted as stand-ins and are rewritten to `query` (a recorded caller confusion, kept as a tolerance). An explicit `query` always wins over an alias if you pass both.
 
-**Response.** JSON: `items`, `count`, `totalFound`, `truncated` and - only on a zero-hit result - `nearest`. Capped at 100. Each item carries `kind` (`type`, `method`, `property`, `field`, `event`, `enum_member` or `operator`), `name`, `declaringType`, `namespace` and `signature`.
+**Response.** JSON: `items`, `count`, `totalFound`, `truncated` and - only on a zero-hit result - `nearest` and, where it applies, `generatedSourcesNote`. Capped at 100. Each item carries `kind` (`type`, `method`, `property`, `field`, `event`, `enum_member` or `operator`), `name`, `declaringType`, `namespace` and `signature`, plus `project` where two hits would otherwise read alike - for example the same type declared under the same full name in two projects, which are kept as two hits.
 
 **Result order.** Results are ranked by match quality first - exact name, then case-insensitive exact, then prefix, then substring - and only within one rank by kind order. An exact match is therefore never hidden by the cap behind weaker substring hits. If the result is truncated, the exact and prefix matches are the ones you got; narrow the query (a longer substring) to see the weaker rest.
 
@@ -450,7 +459,7 @@ Also call it with `force: true` after a restore or build that was meant to repai
 **Notes and limits**
 
 - A user-defined operator is found by its *metadata* name: query `op_Equality`, `op_Addition` or `op_Implicit`, and `op_` lists them all. Every kind listed here is one that `find_usages` and `impact_of_change` resolve; an operator resolves by the same metadata name, with its uses - `a == b`, a cast, an implicit conversion - as its fan-in.
-- Not indexed, so an empty answer is expected for them: local variables, parameters, labels and namespaces.
+- Not indexed, so an empty answer is expected for them: local variables, parameters, labels and namespaces; C# generated into `obj/` that carries real declarations (protobuf/Grpc.Tools, T4, Refit); and a Blazor component written only in a `.razor` file. A zero-hit answer says which of these may apply in `generatedSourcesNote` - the `.razor` case names the component's file - and, unless the query names a `.razor`-only component, also names a source generator that did not run in the analysis, whose output could hold the declaration.
 - When the query matches nothing, `nearest` names the closest declared symbol - a likely typo or case mismatch. A matched symbol never carries it.
 - Dispatchable through `batch`/`measure`.
 
@@ -465,15 +474,15 @@ Also call it with `force: true` after a restore or build that was meant to repai
 | Parameter | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `sessionId` | `string` | yes | - | Session id or absolute solution path. |
-| `symbol` | `string` | yes | - | The exact (case-sensitive) type, method, property, field, event, enum-member or operator name. A user-defined operator matches by its metadata name (e.g. `op_Equality`). |
+| `symbol` | `string` | yes | - | The exact (case-sensitive) type, method, property, field, event, enum-member or operator name. A member also takes `Type.Member` (that type's member only), a type a qualified name (`Ns.Type`, `Outer.Inner`). A user-defined operator matches by its metadata name (e.g. `op_Equality`). |
 
-**Response.** A capped envelope (`items`, `count`, `totalFound`, `truncated`), capped at 50, plus `nearest` when nothing matched. Each item carries `kind`, `name`, `declaringType`, `namespace`, `signature`, `summary`, `line` and `file`.
+**Response.** A capped envelope (`items`, `count`, `totalFound`, `truncated`), capped at 50, plus `nearest` when nothing matched and, where it applies, `generatedSourcesNote`. Each item carries `kind`, `name`, `declaringType`, `namespace`, `signature`, `summary`, `line` and `file`. One declaration compiled in two projects is two results, each with its `project`.
 
 **Notes and limits**
 
 - `file` is the fragment's *own* file: for a partial type, a method points at the file the method lives in, not at the first type fragment. It is omitted only when the snapshot carries no path.
 - `line` is the line the declaration starts on, a leading attribute included - for types, methods, operators, properties, fields and events alike. It is `null` for an enum member and for a source-generated property, for which no line fact is modeled.
-- Matching is exact, so a typo or case mismatch returns an empty list rather than an error; the `nearest` suggestion distinguishes "you spelled it differently" from "this symbol genuinely has no signature". Multiple results are returned for overloads or name collisions.
+- Matching is exact, so a typo or case mismatch returns an empty list rather than an error; the `nearest` suggestion distinguishes "you spelled it differently" from "this symbol genuinely has no signature". Where the run skipped generated C# under `obj/`, a component lives only in a `.razor` file, or a source generator did not run, `generatedSourcesNote` names that third possibility: the declaration exists in code this index never read. Multiple results are returned for overloads or name collisions.
 - Leaner than `get_context`, which returns the full source.
 - Dispatchable through `batch`/`measure`.
 
