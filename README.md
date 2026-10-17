@@ -81,7 +81,7 @@ dump:
 | Check the response cost first | `measure` | The exact token count of one or more planned tool answers, without returning their large payloads |
 
 The focused context tools accept a **token budget**, so a package fits the room your
-agent has. The symbols you name always stay in; when the budget is tight, the package
+agent has. The symbols you name stay in; when the budget is tight, the package
 becomes less detailed around them instead of being cut off in the middle of a block,
 and a leading note says which types, tests or siblings were left out. AICB can
 therefore tell you that a bundle was reduced or capped; it cannot certify that what
