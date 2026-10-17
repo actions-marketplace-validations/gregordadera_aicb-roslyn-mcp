@@ -4,6 +4,140 @@ Versions follow `Major.Minor.Series.Build`. The build number rises by one for ev
 change that lands, so gaps between published versions are normal - not every build is
 released.
 
+## 0.5.503.1 (unreleased) - Signed Windows downloads, resolve_injection reads far more registrations, and markup counts as usage
+
+**Who is affected.** Everyone on the MCP server: reconnect your client once - 9 tools of the
+default profile have a new description (`architecture_overview`, `find_dead_code`,
+`find_implementations`, `find_symbol`, `find_usages`, `get_type_hierarchy`, `impact_of_change`,
+`resolve_injection`, `symbol_signature`); no tool or parameter was added, removed or made
+required. **Scripts that compare `resolve_injection`'s `serviceType`: it now carries the type
+arguments of a generic service** (`IHandler<Saved>`, `IHandler<>` for an open registration).
+A snapshot, saved session or remembered codebase from an earlier version is analyzed afresh the
+first time it is used. The configuration database is not changed. Windows users get signed
+downloads.
+
+### Signed Windows downloads
+
+- **The installer and the programs in the ZIP are code-signed**, with a timestamp: the setup and
+  its uninstaller, `gui\aicb-ui.exe`, `cli\aicb.exe` and the product's own `AIContextBuilder*.dll`
+  files. Windows names the publisher **Gregor Dadera** (file properties, tab *Digital
+  Signatures*). Windows SmartScreen can still warn about a new release until it has enough
+  download history; *More info -> Run anyway* continues as before. The .NET tool package is
+  unchanged; nuget.org signs it.
+
+### `resolve_injection` reads far more registrations
+
+- **Registration helpers of your own, whatever their name:** an extension method in the solution
+  that registers its type arguments, a `Type`, a factory or an instance is followed into its body,
+  also when it calls another helper or is keyed. Such rows say `via <helper>` in their `note`, a
+  keyed helper is read with each call's own key, and a type a factory lambda produces is read as
+  that type. The helper's own registration line is listed once, at the calls read through it.
+- **`ServiceDescriptor` registrations and hosted services:** `Add`, `TryAdd`, `TryAddEnumerable`
+  and `Replace` with a descriptor the call builds, and `AddHostedService<T>()` (as a Singleton
+  `IHostedService`), are read; the rows carry the method in their `note`. Adds to a collection are
+  not reported as conflicts.
+- **Package helper chains** such as `AddSingletonAs<T>().As<I>()`, whose body sits in a package,
+  appear as rows marked `inferred, not read`; they never decide `ambiguous` or the effective
+  registration.
+- **A closed generic query** (`resolve_injection("IRepo<Order>")`) lists the registrations of that
+  closing and the open registrations that serve every closing; `typeArgumentFilter` counts what was
+  left out. `ambiguous` is judged per closed service type. **Each row's `serviceType` now carries
+  its type arguments** - breaking for a script that compared it with a bare name.
+- **An empty answer says why:** the note names the forms that are not read and which of them the
+  solution uses (package registration helpers, assembly scans, convention-based registration,
+  other containers), scoped to the answer's filters.
+- **Repeat queries are fast:** further `resolve_injection` calls on an unchanged solution reuse
+  the first call's work, also inside `batch` and `measure`; after an edit the next call reads the
+  solution again.
+
+### `find_implementations`
+
+- **A closed generic query** (`find_implementations("IHandler<Saved>")`) lists only the types that
+  implement the interface with that type argument; `typeArgumentFilter` counts the other closings
+  and open generic bases, and an implementer whose closing could not be decided is marked
+  `closing: "unresolved"`. An open query answers as before.
+- **External interfaces through your own base types:** for an interface not declared in the
+  solution (`IDisposable`), types that get it through a base class or interface of the solution
+  are listed with `via: "inherited"`.
+
+### Markup counts as usage
+
+- **WPF XAML:** a handler wired to any event (`Loaded="OnLoaded"`, `SelectionChanged`, attached
+  events, `EventSetter`) is a use of the code-behind method, and a property set in markup
+  (attribute, property element, `Setter`, `Trigger`, `Condition`, attached properties also under a
+  URI prefix such as `materialDesign:`) is a use of that property. `find_usages` names the `.xaml`
+  file and `find_dead_code` no longer lists such members. Avalonia `.axaml` event wires are not
+  read yet.
+- **Blazor `.razor`:** members named in `@code` blocks, in code-block statements and in component
+  parameter values written without `@` count, and so do calls through an injected member
+  (`@inject`, `[Inject]`, also from `_Imports.razor`) or through the component's own fields and
+  properties (a `@ref` field included). A component written only as a `.razor` file gets a note
+  naming its file instead of a bare `not_found`.
+
+### More code counts
+
+- **Committed generated files are read:** a `*.Designer.cs` or `*.g.cs` that is part of the
+  repository (designer halves, resource accessors, checked-in generator output) is analyzed, so its
+  types and event wiring count; the same names in build output stay out. Machine-written code is
+  never reported by the quality tools, so handlers wired in a designer file are no longer dead.
+- **Attributes at every position:** an attribute on a parameter, return value, type parameter,
+  local function or lambda is a use of the attribute type; an assembly- or module-level attribute
+  is credited to its file, shown as `<file> (assembly)` or `<file> (module)`.
+- **Object creation in more places:** `new X()` in a constructor initializer (`: base(...)`,
+  `: this(...)`), a finalizer, an operator, an indexer or event accessor, a primary constructor's
+  base argument list or a C# 14 `extension` block is a use of `X`; a function pointer `&M` is
+  credited to the overload it binds.
+- **A checkout below a folder named `bin`, `obj` or `.vs`** (for example `~/bin/repo`) is analyzed
+  normally; before, it showed no types.
+
+### Same names in several projects
+
+- `find_usages` and `impact_of_change` list **one item per declaration** behind a shared name, so
+  `totalFound` counts users; such items add `fullName` and `project`. `impact_of_change` follows
+  its chain per declaration, `directCount` equals `find_usages`' `totalFound`, and `review_context`
+  uses the same numbers. A referencing type's `files` no longer lists namesakes of other projects.
+- `find_symbol` and `symbol_signature` keep two same-named types of two projects as two results,
+  each with `project`.
+- `get_type_hierarchy` lists **each derived type once**; where two would read alike, the line
+  names the full name, and where even that is shared, the project in brackets.
+- `find_production_dead` (Full Select profile) judges each declaration on its own and no longer
+  reports a `partial class Program` of top-level statements.
+
+### Loading at the right platform
+
+- **A solution without an `Any CPU` platform** (only `x64` and `ARM64`, for example) is loaded at
+  the platform a build of the solution uses by default, where one platform fits every project;
+  before, some of its projects could lose their references. Solutions with `Any CPU` are unchanged.
+- **The new sidecar key `designTimeBuildPlatform`** in `<Solution>.aicb.json` sets the platform
+  yourself (`"designTimeBuildPlatform": "x64"`), for the MCP server, the CLI and the desktop app. A
+  value the solution does not name, or one under which its projects build at several platforms, is
+  refused, and the automatic rule decides. After editing it, call
+  `refresh_session(force: true)`; `aicb analyze` prints the platform it takes from the key. Versions
+  before 0.5.503.1 ignore the key.
+- `get_diagnostics` reports the decision in `designTimeBuildPlatform` (`platform`,
+  `solutionConfiguration`, `solutionPlatforms`, `projectsAtOtherPlatform`, `blockers`, `note`,
+  `source: "sidecar"`, `refusedSidecarPlatform`).
+
+### Answers that say what they could not see
+
+- **`get_diagnostics` names projects whose restore wrote nothing** (`unrestoredProjects`), counts
+  their unresolved-name errors and names the repair: `dotnet restore`, or `dotnet workload restore`
+  where a workload is missing.
+- **A source generator that did not run** is named on answers about the affected projects:
+  `generatedCodeNote` on `find_usages`, `impact_of_change`, `instantiation_sites`,
+  `find_tests_for`, `find_implementations` and `get_type_hierarchy`; `find_dead_code` marks such
+  candidates `missingGeneratedCode: true`; a zero-hit `find_symbol` or `symbol_signature` says so in
+  `generatedSourcesNote`.
+
+### Other changes
+
+- **`architecture_overview` stays small on very large solutions:** the type-to-layer map lists
+  every type up to 2,000 and per-layer counts above, and the truncation block names it;
+  `export_markdown` keeps the full map. It is also much faster on solutions where many types share
+  a name, and `solution_metrics`, `coverage_gaps` and `list_insights` are much faster on very large
+  solutions; their answers are unchanged.
+- The README's GitHub Action example pins this release (`@v0.5.503.1` with `version: 0.5.503.1`).
+
 ## 0.5.502.1 (2026-10-13) - Usage answers name the file and line of every user, operators count as uses, and impact_of_change weighs what implements a contract
 
 **Who is affected.** Everyone on the MCP server: reconnect your client once - 16 tools of the
