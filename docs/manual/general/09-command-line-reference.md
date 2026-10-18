@@ -165,6 +165,7 @@ The verb reports on standard error every case in which a flag has no effect or i
 - `--force` without `--session-db` → `note: --force has no effect without --session-db (there is no snapshot to bypass).`
 - `--layer-profile` on a snapshot hit → `note: --layer-profile is ignored on a snapshot hit; pass --force to re-analyze with it.`
 - The analysis scope from the `.aicb.json` file (`analyzePreferredTfmOnly`) on a snapshot hit: the scope is not part of the file-set fingerprint, so the snapshot may have been analyzed under a different scope. Pass `--force` to re-analyze with the current one.
+- When the `.aicb.json` names `designTimeBuildPlatform`: before the analysis, the platform it sets (a refused value as a warning, one not checked against an unreadable solution file as such); on a snapshot hit, that the key is not part of the file-set fingerprint.
 - Namespace exclusion patterns applied from the session database, or from the `.aicb.json` file next to the solution.
 - Analysis limited to the preferred target framework per project.
 - A default layer profile configured in the database drives the rendered document and the gate.

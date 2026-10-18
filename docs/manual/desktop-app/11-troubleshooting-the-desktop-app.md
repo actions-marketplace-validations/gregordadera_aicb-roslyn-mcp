@@ -17,7 +17,7 @@ The desktop app comes in two forms:
 | `AIContextBuilder-Setup-<version>.exe` | Installer, needs administrator rights. It puts the `aicb` command on `PATH` unless you untick that option. Consoles, editors and agents that were already open see the new `PATH` only after a restart. |
 | `AIContextBuilder-<version>-win-x64.zip` | Portable, no installation. `gui\aicb-ui.exe` starts the desktop app; `cli\aicb.exe` is the CLI and MCP server. |
 
-Neither is code-signed yet, so Windows SmartScreen may show "Windows protected your PC" for the installer; *More info* → *Run anyway* continues. Every release lists SHA-256 checksums for its files.
+From version 0.5.503.1 on, the installer and the programs are code-signed; the publisher is `Gregor Dadera`. A new release can still make Windows SmartScreen show "Windows protected your PC" until it has built up reputation; if the dialog names that publisher, *More info* and then *Run anyway* continues. Every release lists SHA-256 checksums for its files.
 
 ### What happens when you start the app
 
@@ -356,7 +356,7 @@ If the recovery check itself fails, a warning dialog titled `Crash recovery` app
 
 **Cause.** Roslyn load problems - an unsupported project type, a broken project file, a missing target framework - are reported as warnings to the log, not to the interface. The affected project quietly drops out of the analysis.
 
-**What to do.** Look for `[Workspace]` lines in `aicb.log`. Fix the project so it loads (the same way it would have to load for `dotnet build`), then reload the solution.
+**What to do.** Look for `[Workspace]` lines in `aicb.log`. Fix the project so it loads (the same way it would have to load for `dotnet build`), then reload the solution. If the solution defines no `Any CPU` platform and AICB did not load it at the platform it builds at, name that platform in the `designTimeBuildPlatform` key of its `<SolutionName>.aicb.json` file (see Step 3 in "Configuring AICB for a team") and reload. Answer `Yes` when the reload asks whether to re-analyze anyway: the file is not counted as a code change.
 
 ### Working in the app
 

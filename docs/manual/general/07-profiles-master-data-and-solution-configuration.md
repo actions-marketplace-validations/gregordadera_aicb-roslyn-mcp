@@ -144,7 +144,8 @@ The file carries the **content** of a configuration - patterns, names, rules - a
   "suppressions": [
     { "producer": "quality-long-methods", "type": "LegacyImporter", "member": "Import", "reason": "generated" }
   ],
-  "analyzePreferredTfmOnly": true
+  "analyzePreferredTfmOnly": true,
+  "designTimeBuildPlatform": "x64"
 }
 ```
 
@@ -160,14 +161,15 @@ The file carries the **content** of a configuration - patterns, names, rules - a
 | `autoInit` | `{ layer, exclusions, test }` booleans | The "auto-initialize on next load" opt-ins per axis, so the intent travels with the repository. The database record remains the primary source; this is the fallback for a fresh clone. | Written only when at least one flag is `true`. |
 | `suppressions` | array of `{ producer, type?, member?, reason? }` | Triage decisions. `producer` alone silences a whole check, `producer` + `type` every hit on one type, `producer` + `type` + `member` exactly one member. `reason` is free text for reviewers. | No suppressions are declared. |
 | `analyzePreferredTfmOnly` | `true` or `false` | Analysis scope: analyze only the preferred target framework's instance of a multi-targeted project. | The scope is not declared. An explicit `false` is a deliberate statement and is written back as `false`. |
+| `designTimeBuildPlatform` | string, a platform as the solution names it (`"x64"`, `"ARM64"`, `"Any CPU"`) | The platform every project is design-time built at, as `dotnet build -p:Platform=x64` would build it. Applies to the desktop app, the CLI and the MCP server. A solution platform is passed as the project platform it maps to under the solution's default configuration. A value the solution file does not name, or a solution platform under which the solution builds its C# projects at several platforms, is refused: the load falls back to the built-in rule, and `get_diagnostics` and the CLI disclose the refused value. If the solution file cannot be read, the value is applied and disclosed as not checked. A blank value, or one that is not a string, makes the whole file invalid, so it is ignored entirely. | The built-in rule decides (see "The build platform"). Versions before 0.5.503.1 ignore this key; 0.5.501.1 and 0.5.502.1 keep it when they rewrite the file, 0.5.500.1 and older drop it. |
 
 The allowed `matchType` values are `Contains`, `StartsWith`, `EndsWith` and `Exact`; on reading they are matched case-insensitively. `apply_solution_config` rejects an invalid value; in a hand-edited file an unparsable value falls back to the axis default.
 
-Note: `layeringPolicy` belongs to the layer axis, `keepNamespaces` and `exclusionsDisabled` to the exclusion axis, and `testProjectRules` plus `testAttributeNames` together are the test axis. That makes ten keys but six axes: layer, exclusions, test, auto-init, suppressions and analysis scope. A keep rule written inside `exclusions` (`"keep": true`) is refused as a broken file; `apply_solution_config` moves such a rule to `keepNamespaces` when it rewrites the file.
+Note: `layeringPolicy` belongs to the layer axis, `keepNamespaces` and `exclusionsDisabled` to the exclusion axis, and `testProjectRules` plus `testAttributeNames` together are the test axis. That makes eleven keys but seven axes: layer, exclusions, test, auto-init, suppressions, analysis scope and build platform. A keep rule written inside `exclusions` (`"keep": true`) is refused as a broken file; `apply_solution_config` moves such a rule to `keepNamespaces` when it rewrites the file.
 
 ### The analysis scope, written by hand
 
-`analyzePreferredTfmOnly` is the one key with no wizard and no control in the graphical interface, so it is written by hand:
+`analyzePreferredTfmOnly` has no wizard and no control in the graphical interface, so it is written by hand (`designTimeBuildPlatform` is the other such key, see "The build platform"):
 
 ```json
 { "analyzePreferredTfmOnly": true }
@@ -180,7 +182,7 @@ The symbol inventory is unchanged - every symbol a query can name is still there
 ### Creating and updating the file
 
 - In the graphical interface, select the solution in `Workspace` and use `Export Config`. It writes the active layer profile, exclusion list, test profile, your triage decisions and the auto-init flags to the sidecar. If the file already exists you are asked before it is overwritten; then it keeps the suppressions only the file holds (but not one you lifted in the Insights panel) and the file's settings for every axis the solution has no choice of its own for, and the confirmation names what it kept and counts what it wrote. A file it cannot read is left untouched and the export is refused. The confirmation reminds you to commit it. Headless analysis auto-discovers the sidecar without `--db-path`, but applies each field according to the per-axis matrix below rather than treating the whole file as one profile.
-- `Import Config` reads the layer rules, the exclusions with their keep rules and `exclusionsDisabled`, and the test axis from a selected JSON/sidecar file and applies them to the selected solution: it creates and activates a custom layer profile, exclusion list and test profile, and keeps a `Strict` layering policy. It does not import the suppressions, auto-init flags or analysis-scope key.
+- `Import Config` reads the layer rules, the exclusions with their keep rules and `exclusionsDisabled`, and the test axis from a selected JSON/sidecar file and applies them to the selected solution: it creates and activates a custom layer profile, exclusion list and test profile, and keeps a `Strict` layering policy. It does not import the suppressions, auto-init flags, analysis-scope key or platform key.
 - `apply_solution_config` writes the configuration database and the sidecar together and returns the path. It keeps the existing file's settings for every axis the call does not set. When the existing file cannot be read, the call is refused before anything is written; a file that becomes unreadable while the database is written is left alone, and a warning says the file was not written.
 - You can edit the file by hand; it is designed for that.
 
@@ -192,8 +194,8 @@ Note: `aicb init` does not write the sidecar, and neither does `init_solution_co
 - The one deliberate exception is `suppressions`: it is read entry by entry, and a malformed entry costs only that entry. A suppression optimizes what a reader has to look at, while a broken layer or exclusion rule would silently change what the analysis reports, so those still fail the whole file.
 - Comments and trailing commas are accepted, as are differently-cased key names and enum names. Numeric enum values are rejected, so `"layeringPolicy": "7"` does not silently become something.
 - There are no key aliases. `layer_rules` is not `layerRules`: an unknown key configures no axis, and a file with no axis at all is not treated as a sidecar.
-- A file with content on none of the five content axes (layer, exclusions, test, suppressions, analysis scope) loads as "no sidecar". The `autoInit` flags ride along with a content-bearing file; a file containing only flags is neither written nor read.
-- Writing **replaces** the whole file, from one read of the file as it stands: axes the writer does not set and keys it does not know are carried over unchanged, and a file it cannot read - malformed, locked, or holding a keep rule inside `exclusions` - is not rewritten at all. Axes that are not present are omitted, so a file that uses only the original two axes stays byte-identical to the older format. `analyzePreferredTfmOnly` is written back exactly as it came in, including an explicit `false`, and the test attribute names keep the spelling the file has. No rule with an empty pattern or layer is written. The write is atomic (a temporary file of its own, then a replace), UTF-8, indented and camelCase; temporary files an interrupted write left are removed.
+- A file with content on none of the six content axes (layer, exclusions, test, suppressions, analysis scope, build platform) loads as "no sidecar"; a file holding only `designTimeBuildPlatform` is a valid sidecar. The `autoInit` flags ride along with a content-bearing file; a file containing only flags is neither written nor read.
+- Writing **replaces** the whole file, from one read of the file as it stands: axes the writer does not set and keys it does not know are carried over unchanged, and a file it cannot read - malformed, locked, or holding a keep rule inside `exclusions` - is not rewritten at all. Axes that are not present are omitted, so a file that uses only the original two axes stays byte-identical to the older format. `analyzePreferredTfmOnly` is written back exactly as it came in, including an explicit `false`, `designTimeBuildPlatform` is carried over unchanged, and the test attribute names keep the spelling the file has. No rule with an empty pattern or layer is written. The write is atomic (a temporary file of its own, then a replace), UTF-8, indented and camelCase; temporary files an interrupted write left are removed.
 
 ### Which axis wins
 
@@ -207,10 +209,13 @@ The sidecar does not outrank everything - the precedence differs per axis:
 | Auto-init flags | database record, mirrored into the sidecar for a fresh clone | not evaluated |
 | Suppressions | database, shared through the sidecar export | not evaluated |
 | Analysis scope | sidecar only | sidecar only |
+| Build platform | sidecar, else the built-in rule | sidecar, else the built-in rule (the MCP server follows the same order) |
 
 Note: if a database is available at all, the sidecar's exclusions are not consulted, even when the database list is empty. The sidecar is the database-free fallback.
 
-Note: the analysis scope is not part of the file-set hash with which AICB decides whether a stored snapshot can be reused. `aicb analyze` therefore prints a note when a snapshot is reused although the scope may have changed since it was written, and points you to `--force`.
+Note: the analysis scope is not part of the file-set hash with which AICB decides whether a stored snapshot can be reused. `aicb analyze` therefore prints a note when a snapshot is reused although the scope may have changed since it was written, and points you to `--force`. The same holds for `designTimeBuildPlatform`: a snapshot holds the facts of the platform it was loaded at, and `aicb analyze` says so on a snapshot hit. When the sidecar names a platform, `aicb analyze` also prints it before the analysis, a refused value as a warning.
+
+Note: after an edit of `designTimeBuildPlatform` alone, an unforced `refresh_session` keeps the platform the session was loaded at, because the `.aicb.json` is not a source file; `refresh_session(force: true)` always reloads the solution through MSBuild and applies the edited value. A new session, or a refresh that reloads the solution for another reason, reads it too.
 
 ## 7.4 How settings are resolved
 

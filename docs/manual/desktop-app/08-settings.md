@@ -742,13 +742,21 @@ This section is a practical order of work for setting up AICB on a team, from "n
 
 If you work headless or want the configuration in version control, write the solution configuration as a git-tracked sidecar file named `<SolutionName>.aicb.json` next to the `.sln` file. It carries rules rather than database IDs, so it is portable. The desktop app can restore its profile content; database-free headless analysis uses the layer/exclusion fallback and analysis scope, while test detection and suppressions follow their separately documented paths. Of the related MCP tools, `solution_config_status` only reads status and `init_solution_config` only gathers proposal material; `apply_solution_config` is the operation that writes the configuration database and sidecar.
 
-One sidecar setting has no wizard and is written by hand:
+Two sidecar settings have no wizard and are written by hand. The first is the analysis scope:
 
 ```json
 { "analyzePreferredTfmOnly": true }
 ```
 
 A multi-targeted project (`<TargetFrameworks>net8.0;netstandard2.0</...>`) is otherwise loaded once per target framework, so every source file is analyzed several times. With this key set, only the newest target framework's instance of each project is analyzed. The default is off, and on a solution without multi-targeting the setting does nothing. Note that it narrows the analysis: a fan-in edge whose only source is a non-preferred instance is lost, so "who uses this" queries can report a smaller blast radius.
+
+The second is the platform at which every project is built when the solution is loaded, as `dotnet build -p:Platform=x64` would:
+
+```json
+{ "designTimeBuildPlatform": "x64" }
+```
+
+Write the platform as the solution's configuration manager names it, for example `x64`, `ARM64` or `Any CPU`. Without the key, a solution that defines `Any CPU` is loaded with no platform set, so every project uses its own default. A solution that defines no `Any CPU` platform is loaded at the platform a build of the solution uses by default, where one platform can stand for that build for every project, and otherwise with no platform set. Set the key when AICB does not apply a platform, or applies one you do not want. A value the solution file does not name, or a solution platform under which its projects are built at more than one platform, is refused, not applied, and the load behaves as if the key were absent. The key is read every time a solution is opened or reloaded, in the desktop app, the CLI and the MCP server alike; in the MCP server, `refresh_session` with `force: true` reloads, and the CLI re-analyzes with `--force` where it would otherwise reuse a saved snapshot. The desktop app has no control for it and does not show which platform a load used: the MCP tool `get_diagnostics` reports it in its `designTimeBuildPlatform` field (omitted when no platform applies and no value was refused), and `aicb analyze` names a platform taken from the key before the analysis and warns about a refused one.
 
 **Step 4 - Share a complete configuration with a constellation.** To move prompts, templates, profiles, schemata and the accompanying application settings to another machine or another team member, use the `Constellations` page: `Export...` on the source machine, then `Import...` and `Apply` on the target. Leave `Include endpoints` off for anything you share outside your network - the file is then safe to pass around, and API keys are never in it. Choose `Skip existing` when the target already has entries you do not want to overwrite, or `Replace` when the file should win. Read the preview before applying; it lists every section and every application setting the file would change. The same file can be applied headless:
 
