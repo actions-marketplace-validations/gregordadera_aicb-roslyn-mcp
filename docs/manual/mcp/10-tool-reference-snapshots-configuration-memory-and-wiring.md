@@ -286,6 +286,7 @@ The four memory tools persist an analyzed codebase in an aicb database and bring
 - A recalled model has **no line numbers**, and line-number-dependent insights are degraded. Call `refresh_remembered` for a live re-analysis.
 - `stale` is `true` when the files changed since the snapshot, or the payload schema or the analyzer identity differs. For a stale result, `reason` lists these possible causes in one fixed sentence; it does not identify which one occurred.
 - The recalled model is served **even when it is stale** - that is the point of instant cross-process context. Treat a stale answer as a hint and refresh before relying on it.
+- The `.cshtml` view census, the generated-code censuses and the top-level-statement facts travel with the snapshot, so the recalled session's answers carry the same notes as a live one. Where the snapshot was stored before such a fact was recorded, the affected answers say `VIEWS NOT KNOWN`, `GENERATED CODE NOT KNOWN`, `TOP-LEVEL CREATIONS NOT KNOWN` or `TOP-LEVEL EFFECTS NOT KNOWN` instead (see "Recall safety" under "Recurring conventions across the catalog"); `refresh_remembered` clears them.
 - The lookup is read-only: a solution that was never remembered is rejected with a message telling you to call `remember_codebase` first.
 
 ### `refresh_remembered`

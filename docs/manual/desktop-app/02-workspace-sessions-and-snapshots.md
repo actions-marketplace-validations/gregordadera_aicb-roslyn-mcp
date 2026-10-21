@@ -343,7 +343,7 @@ The following workflows cover the situations that change after the first success
 
 Use `Reload solution` in the Context Builder's persistent left Solution Tree sidebar, which remains visible on every top-level Context Builder tab (tooltip `Re-analyze the Solution from disk and show the structural delta against the previously loaded Tree as a diff window. (F5)`; the same command is on `F5` while the Context Builder is active).
 
-1. Click `Reload solution`. If no source file has been touched since the last load, a dialog asks `No code changes detected since the last reload (same file-set hash).\n\nRe-analyze anyway?` Answer `No` to skip the analysis; the app stays as it is.
+1. Click `Reload solution`. If no source file has been touched since the last load (the check covers the `.cs`, `.csproj`, `.xaml`, `.cshtml` and `.razor` files below the solution folder), a dialog asks `No code changes detected since the last reload (same file-set hash).\n\nRe-analyze anyway?` Answer `No` to skip the analysis; the app stays as it is.
 2. The analysis runs again against the code on disk. A live reload is performed, so a new automatic snapshot is created and the tab leaves read-only snapshot mode.
 3. Your tree selection and your detail-level overrides are collected before the reload and re-applied to the freshly built tree. Keys that no longer exist are dropped here; they show up in the diff instead.
 4. If the structure changed, the diff window opens (`Solution reload - changes in <solution>`); if nothing changed, an info dialog says `No structural changes detected. The reloaded tree is identical to the previously loaded one.`

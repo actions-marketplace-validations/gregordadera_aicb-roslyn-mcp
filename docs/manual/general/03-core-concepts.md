@@ -42,7 +42,7 @@ A **unit** is everything that has an executable body and can therefore be analyz
 - **Methods** - ordinary method declarations.
 - **Accessor units** - every property, indexer or event accessor with a body (`get { … }`, `set => ...`, `init`, `add`, `remove`), plus the getter of an expression-bodied property such as `public int Total => _a + _b;`. An auto-property accessor (`get;` / `set;`) has no body and produces no unit.
 - **Constructor units** - one per constructor that executes something: a declared constructor is analyzed as a whole declaration, so calls inside `: base(...)` / `: this(...)` arguments are captured, together with the member initializers it runs. For a constructor that is declared elsewhere - the implicit parameterless constructor, a C# 12 primary constructor, a constructor in another partial file, or the implicit static constructor - only the initializers are analyzed. A struct's default constructor runs no initializer, and a record's copy constructor copies instead.
-- **Top-level statements** and **Razor components** - analyzed by their own passes. Their calls and type references are recorded with a `... (top-level)` or `... (razor)` source label, so they appear as callers in fan-in answers.
+- **Top-level statements**, **Razor components** and **`.cshtml` views** - analyzed by their own passes. Their calls and type references are recorded with a `... (top-level)` or `... (razor)` source label (a view as `<path>.cshtml (razor)`), so they appear as callers in fan-in answers.
 
 The distinction is not cosmetic: a private method called only from a property setter would have no caller at all if setters were not units, and the dead-code and fan-in answers would be wrong on live code.
 
@@ -201,10 +201,13 @@ The analysis records the relationships between symbols as **edges**. These are t
 | markup binds member | view → member | `find_binding_usages` |
 | member access | unit → property, field, event or enum member | `find_usages` |
 | markup calls member | view → method | `find_usages` (for example a Blazor event handler referenced only from markup) |
-| top-level statements reference | `Program.cs` → type | `find_usages`, `find_dead_code` (`kinds: type`) |
+| top-level statements reference | `Program.cs` → type (every type the statements name: `typeof`, type arguments, casts, patterns, declared locals, the types in a called method's signature) | `find_usages`, `impact_of_change`, `find_dead_code` (`kinds: type`) |
+| top-level statements create | `Program.cs` -> the type a `new X(...)` there creates | `instantiation_sites`, `lifecycle_of`, the constructor form of `find_usages` (`Type.Type`) |
 | assembly attribute | the file that applies `[assembly: ...]` or `[module: ...]` -> attribute type, labeled with the file path and `(assembly)` or `(module)`, for example `src/App/Properties/AssemblyInfo.cs (assembly)` | `find_usages`, `impact_of_change`, `find_dead_code` (`kinds: type`) |
 
 "Markup" covers WPF `.xaml`, Avalonia `.axaml` and Blazor `.razor` files. In a `.razor` file this includes the C# in `@code` blocks and code-block statements, component-parameter values whose parameter is typed and not a `string`, and calls through an injected member (`@inject`, `[Inject]`) or through a field or property of the component itself, which count for the member on that member's type.
+
+An MVC or Razor Pages view (`.cshtml`) counts where the Razor source generator compiled it in the analysis: what the view calls, reads or names - an `@attribute [X]` included - is a use, credited to the view file. A type injected with `@inject` in a `_ViewImports.cshtml` is credited to that file once, not to every view below it. A view the generator did not compile - a view compiled only at run time, or one the generator did not run for - is not read; a zero fan-in answer and a dead-code candidate list then name those views (`VIEWS NOT READ: ...`), so a missing user there is not read as "unused".
 
 An attribute is a type reference wherever it is applied: on a type, a member, a return value, a parameter, a type parameter, or a local function or lambda.
 

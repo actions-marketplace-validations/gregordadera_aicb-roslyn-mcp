@@ -447,7 +447,7 @@ Note: `DEPENDENCIES` and `METHODS` are written for classes and interfaces even w
 
 ### METHODS
 
-`METHODS` contains one `METHOD` block per method, plus a comment when a type declares methods that are not rendered in this document - for example in a slice that projected the type without its methods. Depending on the detail settings, a method is written in one of the compression modes described below.
+`METHODS` contains one `METHOD` block per method, plus a comment when a type declares methods that are not rendered in this document - for example in a slice that projected the type without its methods. For a type the token budget reduced to its structure, that comment is followed by the signatures of the declared methods the document does not render as `METHOD` blocks (up to 80 lines, then a count of the rest), for example `<!-- 12 declared methods, signatures only: the budget took this type's source out (see the budget note) -->`. Depending on the detail settings, a method is written in one of the compression modes described below.
 
 ### USED_BY
 
@@ -599,7 +599,7 @@ Note: a token budget set on a context template takes effect only in the MCP rend
 
 Trimming runs in two stages, both aimed at the same number:
 
-1. **Type pruning.** Over-budget selected types are first reduced to their structure - they keep their identity and members, but lose their source code - to reach the target. Only if that is not enough are types dropped, down to the ceiling. At least one type always survives, and the export pruner never takes the code of the focal, top-ranked type away. Retrieval slices (`get_context`, `explain_symbol`, `pack_for_task`, `prepare_task`) may still degrade the focal type to structure, with a warning and budget recommendation, when its source alone exceeds the slice budget.
+1. **Type pruning.** Over-budget selected types are first reduced to their structure - they keep their identity and members, and their block lists the signatures of the methods they declare, but they lose their source code - to reach the target. That signature list is charged against the budget too. Only if that is not enough are types dropped, down to the ceiling. At least one type always survives, and the export pruner never takes the code of the focal, top-ranked type away. Retrieval slices (`get_context`, `explain_symbol`, `pack_for_task`, `prepare_task`) may still degrade the focal type to structure, with a warning and budget recommendation, when its source alone exceeds the slice budget.
 2. **Method trimming.** The remaining methods are compressed along the compression ladder until the estimate fits.
 
 The trimming is estimate-based, so the export path measures the finished document and corrects itself in bounded passes. A correction pass may lower the internal floor from 8 000 to 2 000 tokens so that a tight target is reachable.

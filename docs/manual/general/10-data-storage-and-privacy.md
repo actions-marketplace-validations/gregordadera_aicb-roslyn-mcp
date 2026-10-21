@@ -45,6 +45,8 @@ Note: a snapshot keeps the line spans of the analysis it was taken from, but an 
 
 A snapshot records the format it was written in. If a snapshot cannot be read back - an older or damaged payload - it is treated as unusable and the solution is analyzed again instead of returning a half-read result.
 
+Note: a snapshot written by an earlier version is not reused as current. An analysis that would reuse it analyzes again; an MCP session recalled from it is marked `stale`. Where such a snapshot lacks a fact the current version records, the answers that depend on it say so instead of answering as if nothing were missing: `VIEWS NOT KNOWN` (which `.cshtml` views the analysis read), `GENERATED CODE NOT KNOWN` (code a generator did not write, generated C# under `obj/`, markup-only Razor components), `TOP-LEVEL CREATIONS NOT KNOWN` and `TOP-LEVEL EFFECTS NOT KNOWN` (top-level statements). `refresh_remembered` re-analyzes and clears them. A snapshot of the current version carries these facts, so a recalled session answers like a live one.
+
 ## 10.2 The database file
 
 ### Name, location and path rules

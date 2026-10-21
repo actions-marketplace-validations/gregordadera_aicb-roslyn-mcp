@@ -288,6 +288,11 @@ Note: a freshly cloned repository is the most common case. If the solution canno
 
 Note: a solution that defines no `Any CPU` platform can stay incomplete after a build for another reason: the design-time build ran at a platform the build did not write. `get_diagnostics` names the platform used in its `designTimeBuildPlatform` field; set `designTimeBuildPlatform` in the solution's `.aicb.json` to the platform you build at, then call `refresh_session(force: true)` (see "The build platform").
 
+Note: two further causes leave errors about names that do not exist, and `get_diagnostics` names both:
+
+- **A git submodule that was never initialized.** Its folder is empty, so the sources a project's build files name inside it are missing from the compilation, and neither a restore nor a build brings them. `uninitializedSubmodules` lists each such submodule in its `submodules` list (`path`, the `projects` that reach into it, their `unresolvedNameErrors`), and its `note` gives the repair: in the repository root run `git submodule update --init <paths>`, then `refresh_session(force: true)`.
+- **A compile item without a file.** A project lists a file that does not exist on disk - typically one a pre-build step or a code generator writes, which did not run before the analysis. `missingCompileItems` names the project file, the missing files and the errors in that project. Run the step that writes the files, then `refresh_session(force: true)`; if nothing writes them, the project lists a file that does not exist.
+
 ### What `incompleteProjects` means for a number
 
 **Symptom.** `get_diagnostics` reports `errorCount` - possibly a large one, possibly a suspiciously small one - next to `incompleteProjects`, `incompleteRatio` and `suppressedDiagnosticsTotal`.

@@ -97,6 +97,7 @@ A recalled session behaves differently from a live one, and the differences are 
 - Time to live and eviction work exactly as for live sessions.
 - Tools that need the live Roslyn workspace reject a recalled session with a message pointing to `refresh_remembered` (or `analyze_solution`). This includes `refresh_session` - a recalled session cannot be refreshed by it.
 - Snapshots written by older versions may carry no file-set hash. The staleness check then reports "unreliable" rather than "current" and stays silent (see "The staleness disclosure").
+- Facts a snapshot did not record - the `.cshtml` view census, the generated-code censuses, the creations and effects of top-level statements - are disclosed rather than read as "nothing missing": the affected answers carry a `... NOT KNOWN` note that names `refresh_remembered` (see "Recall safety" under "Recurring conventions across the catalog").
 
 `recall_codebase` also tells you whether the snapshot still matches the disk: it reports `stale: true` when the file set drifted, or the payload schema or the analyzer identity differs, and recommends `refresh_remembered` for a live re-analysis. The recalled model is served either way - that is the point of recalling.
 
@@ -231,7 +232,7 @@ What the automatic path does and does not touch:
 The proactive mode adds a file watcher on the solution folder (including subdirectories). It observes C# saves and raises **one** signal once writing has stopped.
 
 - **Quiet period (debounce): 15 seconds**, overridable with `AICB_MCP_DEBOUNCE_MS`. Every further save restarts the window, so a burst of edits produces one re-analysis rather than one per keystroke.
-- **Only `.cs` files trigger it.** A change to a `.csproj` or `.xaml` file is not a proactive trigger; it is still caught at the next tool call.
+- **Only `.cs` files trigger it.** A change to a `.csproj`, `.xaml`, `.cshtml` or `.razor` file is not a proactive trigger; it is still caught at the next tool call.
 - **The watcher is a trigger, never the source of truth.** File watchers can drop events under load (a checkout, a build, a stash). A dropped or overflowed event is treated as an ordinary signal - "something moved" - and the file-set comparison decides whether anything is actually stale. A missed event can therefore delay a refresh, never hide one.
 - Watchers are armed **after** the tool call, for the sessions that call touched. Arming earlier would skip the call that creates a session.
 - **Failure is silent and falls back to the reactive path.** If the watcher cannot be created (an unreachable folder, a platform watch limit), or an event is lost, the drift is still found at the next tool call and repaired there under `Reactive`/`Proactive`. The visible symptom is simply that the staleness disclosure appears again - a working watcher is the case where no disclosure appears at all.

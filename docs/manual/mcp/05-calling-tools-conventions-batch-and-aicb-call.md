@@ -288,6 +288,17 @@ Many tools state in their own description that they "work on recalled sessions" 
 
 `get_diagnostics`, `check_doc_drift`, `init_solution_config`, `check_solution_config_drift`, `resolve_injection`, `evaluate_change_set`, `diff_review` (both sessions must be live), and `find_unresolved_bindings`, which runs against the live analysis and reports no findings on a recalled snapshot - and says so when the session looks recalled. `refresh_session` likewise rejects a recalled session; use `refresh_remembered` or `analyze_solution` to get a live one.
 
+The run facts behind several notes are stored with the snapshot, so a recalled session carries the same notes as the live one: which `.cshtml` views the Razor generator did not compile (`VIEWS NOT READ`), which generated C# the index skipped, which Razor components exist only in markup, which projects were compiled without a generator's code (`generatedSourcesNote`, `generatedCodeNote`, `missingGeneratedCode`), and the creations, external calls and side effects of top-level statements. A session recalled from a snapshot stored before a fact was recorded cannot know it, and says so instead of answering as if nothing was missing. Each such note names `refresh_remembered` as the remedy:
+
+| Note opens with | Appears on |
+|---|---|
+| `VIEWS NOT KNOWN` | where `VIEWS NOT READ` would: a zero fan-in of `find_usages` or `impact_of_change`, and a non-empty candidate list of `find_dead_code` or `find_production_dead` |
+| `GENERATED CODE NOT KNOWN` | a zero-hit `find_symbol` or `symbol_signature`; a `not_found` answer of `find_usages`, `impact_of_change` or `get_type_hierarchy`, a plain typo included; the fan-in, construction, declaration and tests answers about a declared subject; an empty `find_implementations` for an undeclared name; a non-empty `find_dead_code` list |
+| `TOP-LEVEL CREATIONS NOT KNOWN` | `instantiation_sites`, `lifecycle_of` and the `find_usages` constructor form `Type.Type`, also on a populated answer, where the scope admits top-level sites |
+| `TOP-LEVEL EFFECTS NOT KNOWN` | an unscoped `calls_external` query and an unscoped `find_by_side_effects` query other than `purity='pure'`, also on a populated answer |
+
+A snapshot written by an earlier version lacks all of these facts, so on such a recalled session many answers carry one of the notes, even for a solution that has no views or top-level statements. `refresh_remembered` clears them.
+
 ---
 
 [&larr; 4 Profiles, pools and facets](04-profiles-pools-and-facets.md) &middot; [Contents](README.md) &middot; [6 Tool reference: orientation, sessions and symbols &rarr;](06-tool-reference-orientation-sessions-and-symbols.md)
