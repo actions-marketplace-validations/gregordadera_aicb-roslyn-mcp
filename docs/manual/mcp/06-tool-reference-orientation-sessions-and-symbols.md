@@ -342,6 +342,7 @@ Also call it with `force: true` after a restore or build that was meant to repai
 **Notes and limits**
 
 - Cheap to call speculatively: a file-set hash check skips the expensive Roslyn re-run when nothing actually changed, and a C# file whose timestamp moved while its text stayed the snapshot's (a save without an edit) does not count as a change either.
+- An edit of a `.cshtml` or `.razor` file counts as a change too: the call reports `changed: true` and re-analyzes with a full reload.
 - That check reads *source* files, so it cannot see a restore or build. After one of those, an analysis that reported unresolved references retries once by itself; `force: true` is the deterministic way to demand it. It costs a full MSBuild reload, so leave it `false` for the normal after-an-edit refresh.
 - `mode` is the only indicator when the incremental path stops engaging: answers stay correct, calls just get slow again.
 - Note: when nothing was re-analyzed but the session's last analysis was incomplete, the answer carries a note explaining that a restore/build repairs that without touching a source file, and telling you to call again with `force: true`.
@@ -379,9 +380,11 @@ Also call it with `force: true` after a restore or build that was meant to repai
 | `cascadeClassifiedCount` | How many of the listed diagnostics are cascade-classified fallout of an incomplete dependency (each such item carries `cascadeFromIncomplete: true`). |
 | `referenceBindingAdvisoriesSuppressed` | How many assembly-reference version-float advisories (`CS1701`/`CS1702`) were filtered out. |
 | `reliable` | `false` when a strict majority of scanned projects are incomplete. |
-| `generatedCodeGaps` | Code that a source generator or the WPF markup compiler writes is missing from a project. |
-| `designTimeBuildFailures` | MSBuild reported a failure loading a project (a warning reads alike); its compiler options may be incomplete. |
+| `generatedCodeGaps` | Code that a source generator or the WPF markup compiler writes is missing from a project. A generator reference that points at the output of a solution project built at another configuration or platform than this load builds it at is named as that - kind `not-built`, or a hedged `not-found` where it cannot be told whether the project holds a generator - not as an unrestored package; where the producing project declares no source generator, the reference is not listed at all. |
+| `designTimeBuildFailures` | MSBuild reported a failure loading a project (a warning reads alike); its compiler options may be incomplete. A Visual Studio Web Site entry in a `.sln` (a URL or folder path with no project file) is in most cases not counted as a failure (such a solution is then cached, so its next open is fast); it still is when a loaded project lost a project reference; a missing `.csproj` stays a failure, and Web Site entries in a `.slnx` are not recognized. |
 | `unrestoredProjects` | Projects that resolve their core references but have unresolved-name errors (`CS0246`/`CS0234`) and no `project.assets.json` where their restore writes it: `unresolvedNameErrors`, a `note`, and `projects`, each with `project`, `searchedFrom` and `unresolvedNameErrors`. The note names the repair - `dotnet restore`, and on `NETSDK1147` `dotnet workload restore`. Nothing is removed from the counts. Omitted when no such project exists. |
+| `uninitializedSubmodules` | Git submodules that were never initialized (their folder is empty) while a project with `CS0246`/`CS0234` errors names a path inside one in its build files (the project file, an import, the nearest `Directory.Build.props`/`.targets`): `unresolvedNameErrors`, a `note`, and `submodules`, each with `path`, `projects` and `unresolvedNameErrors`. Neither a restore nor a build brings those sources; the note names the repair, `git submodule update --init <paths>` in the repository root, then `refresh_session(force: true)`. The notes of `unrestoredProjects` and `generatedCodeGaps` add a sentence when their projects are among these. Omitted when no such submodule exists. |
+| `missingCompileItems` | Compile items that a project with counted errors lists while no file exists at that path, so the compilation read each as an empty file - typically a file a pre-build step or a code generator writes that did not run: `errors`, a `note`, and `projects`, one entry per project file (every target framework of a multi-targeted project in one), each with `projectFile`, `projects` (the instance names), `files` (solution-relative, in full outside the solution folder) and `errors`. The note says which errors are likely this and the repair: run the build step, then `refresh_session(force: true)`. Omitted when no such item exists. |
 | `designTimeBuildPlatform` | The platform decision of the load: `platform`, `solutionConfiguration`, `solutionPlatforms`, `projectsAtOtherPlatform`, `blockers` and a `note`; `source: "sidecar"` when the sidecar decided, and `refusedSidecarPlatform` when the sidecar value was refused. When the sidecar names a solution platform that maps the projects to another platform name (for example `Win32` built at `x86`), the `note` says so. Present when the load chose a platform, could not choose one, or refused the sidecar's value; `platform` is absent when no single platform could be chosen. Omitted when the solution defines `Any CPU`, builds every C# project at AnyCPU, or could not be read, and the sidecar names no platform. See the note below. |
 
 **Notes and limits**
@@ -450,7 +453,7 @@ Also call it with `force: true` after a restore or build that was meant to repai
 
 **Aliases.** The tool schema advertises `query`, but `symbol` and `name` are accepted as stand-ins and are rewritten to `query` (a recorded caller confusion, kept as a tolerance). An explicit `query` always wins over an alias if you pass both.
 
-**Response.** JSON: `items`, `count`, `totalFound`, `truncated` and - only on a zero-hit result - `nearest` and, where it applies, `generatedSourcesNote`. Capped at 100. Each item carries `kind` (`type`, `method`, `property`, `field`, `event`, `enum_member` or `operator`), `name`, `declaringType`, `namespace` and `signature`, plus `project` where two hits would otherwise read alike - for example the same type declared under the same full name in two projects, which are kept as two hits.
+**Response.** JSON: `items`, `count`, `totalFound`, `truncated`, on a zero-hit result `nearest`, and, where it applies, `generatedSourcesNote` - on a zero hit, and on a populated answer when the name is also a Razor component written only in markup (see below). Capped at 100. Each item carries `kind` (`type`, `method`, `property`, `field`, `event`, `enum_member` or `operator`), `name`, `declaringType`, `namespace` and `signature`, plus `project` where two hits would otherwise read alike - for example the same type declared under the same full name in two projects, which are kept as two hits.
 
 **Result order.** Results are ranked by match quality first - exact name, then case-insensitive exact, then prefix, then substring - and only within one rank by kind order. An exact match is therefore never hidden by the cap behind weaker substring hits. If the result is truncated, the exact and prefix matches are the ones you got; narrow the query (a longer substring) to see the weaker rest.
 
@@ -460,6 +463,7 @@ Also call it with `force: true` after a restore or build that was meant to repai
 
 - A user-defined operator is found by its *metadata* name: query `op_Equality`, `op_Addition` or `op_Implicit`, and `op_` lists them all. Every kind listed here is one that `find_usages` and `impact_of_change` resolve; an operator resolves by the same metadata name, with its uses - `a == b`, a cast, an implicit conversion - as its fan-in.
 - Not indexed, so an empty answer is expected for them: local variables, parameters, labels and namespaces; C# generated into `obj/` that carries real declarations (protobuf/Grpc.Tools, T4, Refit); and a Blazor component written only in a `.razor` file. A zero-hit answer says which of these may apply in `generatedSourcesNote` - the `.razor` case names the component's file - and, unless the query names a `.razor`-only component, also names a source generator that did not run in the analysis, whose output could hold the declaration.
+- A bare name that is both a C# member and a Razor component written only in markup (a constant `Snippets.AlertSimpleExample` beside a component `AlertSimpleExample.razor`) finds the member; when no C# type of that name is in the answer, `generatedSourcesNote` adds that the name is ALSO such a component, whose class has no symbol and no fan-in here, and names its file.
 - When the query matches nothing, `nearest` names the closest declared symbol - a likely typo or case mismatch. A matched symbol never carries it.
 - Dispatchable through `batch`/`measure`.
 
@@ -483,6 +487,8 @@ Also call it with `force: true` after a restore or build that was meant to repai
 - `file` is the fragment's *own* file: for a partial type, a method points at the file the method lives in, not at the first type fragment. It is omitted only when the snapshot carries no path.
 - `line` is the line the declaration starts on, a leading attribute included - for types, methods, operators, properties, fields and events alike. It is `null` for an enum member and for a source-generated property, for which no line fact is modeled.
 - Matching is exact, so a typo or case mismatch returns an empty list rather than an error; the `nearest` suggestion distinguishes "you spelled it differently" from "this symbol genuinely has no signature". Where the run skipped generated C# under `obj/`, a component lives only in a `.razor` file, or a source generator did not run, `generatedSourcesNote` names that third possibility: the declaration exists in code this index never read. Multiple results are returned for overloads or name collisions.
+- A member that shares its bare name with a Razor component written only in markup is returned as usual, and `generatedSourcesNote` names the component as a different symbol, as in `find_symbol`.
+- A qualified member query respects every segment: `Outer.Inner.Member` or `Ns.Type.Member` answers for the member of the type whose full name ends in that chain, also through a generic outer type (`Outer<T>.Inner.Save`), not for every type that carries the last type segment's name.
 - Leaner than `get_context`, which returns the full source.
 - Dispatchable through `batch`/`measure`.
 
@@ -502,7 +508,7 @@ Also call it with `force: true` after a restore or build that was meant to repai
 | `includeQualityMetrics` | `bool` | no | `false` | Also emit the `<QUALITY_HOTSPOTS>` section plus `complexity="..."` / `ce="..."` tag attributes. |
 | `lean` | `bool` | no | `true` | Drop the `<AI_CONTEXT_SPEC>` format-rules preamble, the `<AI_CONTEXT_META>` block and empty graph sections. |
 
-**`budget`.** Caps the slice in two ways: it compacts or drops method bodies, and - when the expanded neighborhood still overflows - it drops the least-relevant non-seed types entirely, ranked by closeness to the seed and in-slice fan-in. The seed symbol itself is never dropped: it renders with its full source when that fits the budget, otherwise as *structure* (identity, members, every method signature) with a leading note naming the measured size of the full-code render and the budget that would hold it. Without a value the slice still renders against a ceiling - the active MCP profile's token budget, else a default of about 10,000 tokens - that bounds the neighborhood. Pass a value for a tighter slice.
+**`budget`.** Caps the slice in two ways: it compacts or drops method bodies, and - when the expanded neighborhood still overflows - it drops the least-relevant non-seed types entirely, ranked by closeness to the seed and in-slice fan-in. The seed symbol itself is never dropped: it renders with its full source when that fits the budget, otherwise as *structure* (identity, members, every method signature) with a leading note naming the measured size of the full-code render and the budget that would hold it. A type reduced to structure lists the signatures of every method it declares that does not already render as a method block, up to 80 lines and then a `(+N more)` line, under a comment such as `<!-- N declared methods, signatures only: the budget took this type's source out (see the budget note) -->`; the list counts against the budget. Without a value the slice still renders against a ceiling - the active MCP profile's token budget, else a default of about 10,000 tokens - that bounds the neighborhood. Pass a value for a tighter slice.
 
 **`includeQualityMetrics`.** Set it when reviewing code quality or picking refactor targets: the slice additionally carries cyclomatic complexity and efferent coupling, as a `<QUALITY_HOTSPOTS>` section and as tag attributes on the sliced symbols.
 
@@ -514,6 +520,8 @@ Also call it with `force: true` after a restore or build that was meant to repai
 
 - Multi-TFM solutions are deduplicated to one logical project per name, keeping the newest target framework's instance - the same view `find_symbol` lists. `export_markdown` deliberately keeps the unfiltered per-target-framework render.
 - When several types share the name you pass (in different namespaces), every one of them renders, not only one.
+- A slice centered on an interface pulls its implementing types - those that implement it directly, through a base class or through another interface, for a generic interface whatever type arguments they close it with. Under a budget the leading comment names how many types were dropped (`dropped N least-relevant types ...`).
+- A partial type renders as one block per project it is compiled into: within each project its declaration fragments are folded, and a leading comment says which files. Where the type is compiled into more than one project (a linked file, a shared project), that comment names the project it was folded in (`<Type> in project <Name>`), also when the other project holds only a single fragment of it. The type name is namespace-qualified when another entry of the same comment has the same simple name - for example when two projects fold it.
 - Dispatchable through `batch`/`measure`.
 
 ### `explain_symbol`
@@ -540,12 +548,20 @@ Also call it with `force: true` after a restore or build that was meant to repai
 |---|---|
 | `callers` | The members that reference the symbol, with their bodies, and their owner types as structure - not the calling types whole. A caller that references the symbol only from its structure (a field or property type, a base list) renders as that caller's own declaration. |
 | `callees` | What the symbol calls or depends on, depth 1. This is the widest slice this server produces. |
-| `implementations` | The types implementing it, if it is an interface. Every same-named type the axis lists renders. |
-| `tests` | Its covering test cases. |
+| `implementations` | The types implementing it, if it is an interface - also those that get a generic interface through a base class or another interface, as `find_implementations` lists them. Every same-named type the axis lists renders. |
+| `tests` | Its covering test cases. For a method, the method's own tests, bare or qualified - not the tests that read a same-named property. |
 | `siblings` | Naming and file-convention kin. Every same-named type the axis lists renders. |
 | `quality` | Complexity and efferent-coupling hotspot metrics. |
 
-**Response.** Markdown with a leading *manifest* comment that discloses what each requested merge axis actually found - so `(none)` is an honest negative (no implementation, no caller, no test), not "not asked". A partial type renders as one block (its declaration fragments are folded; a leading comment says which files) instead of one identical block per file.
+**Response.** Markdown with a leading *manifest* comment that discloses what each requested merge axis actually found - so `(none)` is an honest negative (no implementation, no caller, no test), not "not asked". A partial type renders as one block per project it is compiled into (its declaration fragments are folded; a leading comment says which files, and names the project where the type is compiled into more than one) instead of one identical block per file.
+
+**Other kinds of the same name.** The callers axis answers for the center - the type or the method the symbol resolved to. When a bare name also names a property, field, event, enum member or operator elsewhere (for a type center, also a method), those members' users are not counted as the center's callers: a center nobody uses reads `callers: (none)`, and without the callers axis the manifest no longer states their fan-in as the center's. The manifest then carries a `namesakes:` segment, for example:
+
+```text
+namesakes: 'Clock' also names property TimeService.Clock (3 direct user(s)) - their users are not counted as the type's callers; find_usages takes the qualified Type.Member form to measure one
+```
+
+It names up to three forms per kind and then `and N more`, with each kind's direct user count, appears with or without a callers axis and also when the center has users of its own, and is absent for a qualified query and when no other kind of the name has users.
 
 **Notes and limits**
 

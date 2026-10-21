@@ -358,6 +358,8 @@ If the recovery check itself fails, a warning dialog titled `Crash recovery` app
 
 **What to do.** Look for `[Workspace]` lines in `aicb.log`. Fix the project so it loads (the same way it would have to load for `dotnet build`), then reload the solution. If the solution defines no `Any CPU` platform and AICB did not load it at the platform it builds at, name that platform in the `designTimeBuildPlatform` key of its `<SolutionName>.aicb.json` file (see Step 3 in "Configuring AICB for a team") and reload. Answer `Yes` when the reload asks whether to re-analyze anyway: the file is not counted as a code change.
 
+Two further causes leave symbols out without a message in the app. A git submodule that was never initialized leaves an empty folder, so the sources a project compiles from it are missing: run `git submodule update --init` in the repository root and reload. A file that a pre-build step or a code generator writes is missing when that step has not run: build the solution once and reload. The MCP tool `get_diagnostics` names both cases (`uninitializedSubmodules`, `missingCompileItems`).
+
 ### Working in the app
 
 #### The tab strip is locked while a run is active

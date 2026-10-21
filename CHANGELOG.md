@@ -4,6 +4,167 @@ Versions follow `Major.Minor.Series.Build`. The build number rises by one for ev
 change that lands, so gaps between published versions are normal - not every build is
 released.
 
+## 0.5.504.1 (2026-10-21) - Razor views and Avalonia markup count as usage, every implementer of a generic interface is found, and Program.cs counts in full
+
+**Who is affected.** Everyone on the MCP server: reconnect your client once - 8 tools of the
+default profile have a new description (`calls_external`, `explain_symbol`, `find_by_side_effects`,
+`find_dead_code`, `find_implementations`, `find_resource_usages`, `instantiation_sites`,
+`resolve_injection`); no tool or parameter was added, removed or made required. **Scripts that
+compare `find_implementations`' `via`:** on an open query (`IHandler`, `IHandler<T>`) some items
+that said `via: "back-edge"` now say `via: "inherited"`, and on a closed query
+(`IHandler<Saved>`) such an item carries no `via`. A snapshot or saved session from an
+earlier version is analyzed afresh the first time it is used. A codebase remembered with an
+earlier version is recalled as `stale`, and until `refresh_remembered` the answers concerned say
+what the old snapshot does not know (`VIEWS NOT KNOWN`, `GENERATED CODE NOT KNOWN`, `TOP-LEVEL CREATIONS
+NOT KNOWN`, `TOP-LEVEL EFFECTS NOT KNOWN`), also on a solution without views. The first open of
+each solution after the update takes the full design-time build once. The configuration database
+is not changed.
+
+### Razor views count as usage
+
+- **MVC and Razor Pages views:** the code the Razor generator compiles from `.cshtml` views is
+  read. What a view calls, reads or names is a use credited to the view (`<path>.cshtml (razor)`);
+  a type injected in a `_ViewImports.cshtml` is credited to that file once, and `@attribute [X]` is
+  a use of `X`. `find_usages`, `impact_of_change`, `find_dead_code` and `find_production_dead`
+  follow.
+- **Views that were not read are counted:** where the generator did not compile some views (a
+  runtime-compiled view in a plain `Microsoft.NET.Sdk` project, a generator that did not run), a
+  `VIEWS NOT READ` note gives their number and projects on a zero fan-in and on the dead-code candidate lists. A session
+  restored with `recall_codebase` carries the same note.
+- **Editing a `.cshtml` or `.razor` file marks the session stale**, and `refresh_session`
+  analyzes it again; before, a `.razor` edit went unnoticed.
+- **A Blazor component written only in markup is named beside a same-named C# member** - in
+  `generatedSourcesNote` of `find_symbol` and `symbol_signature`, in `collision` of `find_usages`
+  and `impact_of_change`, and in `get_type_hierarchy`'s `not_found`.
+
+### Avalonia and XAML markup
+
+- **Avalonia `.axaml` views are read like WPF `.xaml`:** a handler wired to an event
+  (`Click="OnSave"`) is a use of the code-behind method, and a property set in markup (attribute,
+  property element, `Setter`, attached property) is a use of that property. A bare `Setter` under a
+  `Style Selector` is a use of the styled type's property, also in a nested `^` style; a selector
+  naming several types or none records nothing. A `Classes.accent="True"` toggle is not counted as a use of a
+  `Classes` member.
+- **Nested types written `prefix:Outer+Inner`** are read in `{x:Type}`, `x:Static`, `DataType`,
+  `TargetType`, `d:DesignInstance`, attached-property owners and markup extensions, so
+  `find_unresolved_bindings` judges against the nested type and the nested type gains its markup
+  users.
+- **`find_resource_usages` reads three more key channels:** WinUI's `{ThemeResource}` (kind
+  `theme`), a resource markup extension the solution derives itself (counted as its base's kind),
+  and a C# member whose name is the key, read through a `[CallerMemberName]` accessor (kind
+  `callerMemberName`). New counts `themeReferenceCount` and `callerMemberNameReferenceCount`
+  appear when not zero.
+
+### Every implementer of a generic interface
+
+- **`find_implementations` and `impact_of_change` find the types that implement a generic
+  interface of the solution through a base class, another interface or further down**
+  (`Update : HandlerBase<Saved>`, `Leaf : Update`); before, many of them were missing. On an open
+  query such items say `via: "inherited"`. A closed query no longer lists the
+  subclasses of an unrelated base class of the same name, and a non-generic interface nested in a
+  generic type also gets its indirect implementers.
+- **The context tools pull them too:** `get_context`, `pack_for_task` and `prepare_task` centered
+  on a generic interface include every implementer, and say what a budget dropped
+  (`prepare_task` where its manifest says `render: lean`, as on a server without a configuration
+  database).
+- A type in the global namespace and a namespaced type of the same simple name are no longer
+  taken for each other in `find_implementations` and in `impact_of_change`.
+
+### `Program.cs` with top-level statements counts in full
+
+- **Every type the top-level code names is used by that file** (`<path>/Program.cs (top-level)`):
+  `typeof`, type arguments such as `AddTransient<I, Impl>()`, casts, patterns, declared locals and
+  the types of a called method's signature. Before, only object creation and a static qualifier
+  counted. `find_usages`, `impact_of_change` and `find_dead_code` follow; a bare name that is both a
+  type and a member can now answer for the type.
+- **A `new` there is a creation site** in `instantiation_sites`, `lifecycle_of` and `find_usages`'
+  constructor form (`Type.Type`); a namespace scope leaves it out.
+- **`calls_external` and `find_by_side_effects` list each such file as one unit** beside the
+  methods, with the effects of what it calls; `methodsScanned` counts it. A namespace-scoped query
+  and `purity='pure'` stay methods-only, and `list_insights` still judges methods only.
+
+### Dependency injection
+
+- **`resolve_injection` counts consumers outside the constructor** in the new field
+  `otherConsumers`, one entry per form with `consumers`, `sites` and up to three `examples`:
+  `locator` for `GetService<T>()`, `GetRequiredService<T>()`, `GetService(typeof(T))` and their
+  keyed forms (also through `?.`), and `inject-property` for `[Inject]` properties and Razor
+  `@inject`. `constructorConsumerCount` keeps its meaning. A service named only by an `@inject`
+  (such as `NavigationManager`) is now found instead of `not_found`.
+- **MEF exports are registration rows:** `[Export]` of `System.ComponentModel.Composition` or
+  `System.Composition` (also a derived attribute) on a class or on its members, with the note
+  `MEF export` and the lifetime from the creation policy or `[Shared]`. MEF rows never make an
+  answer `ambiguous` and never win `effectiveRegistration`; with two or more MEF exports and no
+  Microsoft DI registration, the reason says that MEF composes by contract. The empty answer's
+  note names MEF.
+- A registration in a project outside the solution folder shows a relative `location`
+  (`..\...`) instead of the bare file name.
+
+### Dead code
+
+- **An explicit interface implementation whose interface did not bind** (a missing reference) is
+  no longer listed by `find_dead_code`; it counts under `methodsIneligibleUnanalyzedCallers`.
+- **A library's public API is marked:** in `find_dead_code` and `find_production_dead`, a type a
+  library exposes (and in `find_production_dead` such a type's public or protected method) carries
+  `publicApi: true`, and `publicApiNote` says that consumers outside the solution are not seen.
+  Nothing is left out.
+- **A MEF part** (an export attribute on the type or on one of its members) is no longer reported
+  as unused by `find_dead_code`, the type axis of `find_production_dead` or `list_insights`.
+
+### More precise names and context
+
+- **A qualified member query reads every segment** (`Outer.Inner.Member`) in `find_usages`,
+  `impact_of_change`, `find_tests_for`, `symbol_signature`, `symbol_metrics` and the context tools;
+  a qualifier that names none of the same-named types answers `not_found`, in `find_usages` and
+  `impact_of_change` with a note naming them,
+  and `find_usages` adds `namesakes` where the type part still names several types.
+  `Outer<T>.Inner.Member` resolves.
+- **A generic type parameter is no longer a use of a type named like it** (a `struct T`), in
+  `find_usages`, `impact_of_change`, `find_dead_code` and the coupling numbers.
+- **`explain_symbol` answers for the type or method it centers on:** where the same bare name also
+  names a property or another member elsewhere, the callers axis no longer lists that member's
+  readers, a method's tests axis lists only the method's own tests, and a new `namesakes:` segment
+  in the manifest names the other kinds and their user counts.
+- **A partial type compiled into several projects** (a linked file, a shared project) renders one
+  block per project in `get_context`, `explain_symbol`, `pack_for_task` and `prepare_task`
+  (`render: lean`), and the partial note names the project.
+- **A type a token budget reduces to its structure lists the signatures** of the methods it does
+  not show in full (up to 80 lines); before, `prepare_task`'s default `template` render listed
+  none, and a type that kept some of its methods dropped the others without a word. Where
+  quality metrics are rendered, its `members` counts what the type declares in its project.
+
+### `get_diagnostics` says more about what is missing
+
+- **`missingCompileItems`** names compile items the build lists without a file on disk (often a
+  file a build step writes), per project file, with the errors they likely explain and the repair.
+- **`uninitializedSubmodules`** names git submodules that were never initialized and that a
+  project with unresolved names points into, with a `submodules` list and the
+  `git submodule update --init` command.
+- **A source generator referenced from another configuration or platform output** of a project in
+  the solution is reported as `not-built` (or `not-found` where it cannot be told whether that
+  project holds a generator) instead of as an unrestored package; where that project
+  declares no generator, the entry is gone.
+- Repeated runs of a solution in which a referenced C# project has an unresolved type no longer
+  report different error counts; before, some runs reported extra errors.
+
+### Faster
+
+- The first `resolve_injection` call in a process is much faster on large solutions.
+- `find_production_dead` (Full Select profile) answers in seconds on large solutions where it ran
+  for minutes, for every `kinds` value.
+- Two more solution shapes open again quickly from the design-time build cache: a project that
+  lists a compile item without a file, and a `.sln` with Visual Studio Web Site entries. In most
+  cases such an entry no longer counts as a failed design-time build; it still does when a project
+  lost a project reference. A missing `.csproj` is still a failure, and Web Site entries in a
+  `.slnx` are not recognized.
+
+### Other changes
+
+- A session restored with `recall_codebase` keeps the generated-code notes (`generatedSourcesNote`,
+  `generatedCodeNote`, the markup-only component note, `missingGeneratedCode` in `find_dead_code`);
+  before, they were dropped.
+- The README's GitHub Action example pins this release (`@v0.5.504.1` with `version: 0.5.504.1`).
+
 ## 0.5.503.1 (2026-10-17) - Signed Windows downloads, resolve_injection reads far more registrations, and markup counts as usage
 
 **Who is affected.** Everyone on the MCP server: reconnect your client once - 9 tools of the

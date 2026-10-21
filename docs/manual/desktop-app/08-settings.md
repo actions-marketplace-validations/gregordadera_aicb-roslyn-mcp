@@ -603,6 +603,8 @@ What the stages do, per pipeline:
 | | `Exclude generated code ([GeneratedCode])` | Do not expand into generated code. |
 | | `Max nodes total (empty = unlimited)` | Hard cap on the number of nodes the expansion may emit - a safety net against runaway graph walks. |
 
+`Interface implementations` follows an interface to the types that implement it, within the strategy's type depth and stop conditions. For a generic interface (`IHandler<T>`) the implementers it can reach are the implementers of every closing (`IHandler<Saved>`, `IHandler<Deleted>`), whether a type implements it directly, through a base class or through another interface.
+
 `Apply as Active` sets the selected strategy as the app-global default, used by tabs when no run- or template-specific strategy is set.
 
 ## 8.18 Compression Rules

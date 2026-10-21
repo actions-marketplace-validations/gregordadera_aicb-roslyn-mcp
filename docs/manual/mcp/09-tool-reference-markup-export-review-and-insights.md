@@ -28,6 +28,7 @@ Markup connects views to view-models and to resources by string. Resource keys h
 
 - WPF/WinUI `.xaml`: the view-model is resolved through `d:DesignInstance` or through a unique `FooView` -> `FooViewModel` naming convention.
 - Avalonia `.axaml`: `{Binding}` and `{CompiledBinding}`; the view-model is resolved only through `x:DataType` at scope level, so no naming convention applies.
+- A nested type written `prefix:Outer+Inner` in a `DataType`/`x:DataType`, written as `{x:Type ...}` or in the bare form, scopes its bindings to the nested type, not to its outer type.
 
 **What is deliberately skipped.** A binding whose DataContext scope cannot be typed with certainty is never flagged: `ControlTemplate`/`Style`, a runtime DataContext, keyed resources, and a template without a `DataType`. WPF alone recovers an item template's type from the host's pinned `ItemsSource`; on Avalonia, a template without `x:DataType` - `TreeDataTemplate` included - is always skipped. Only view-models resolved with certainty and with a verifiable member surface are checked; source-generated members (`[ObservableProperty]`, `[RelayCommand]`) and inherited members count as resolved. The trade-off is a recall miss, never a false report.
 
@@ -74,6 +75,7 @@ Availability: in the default tool set; usable as a sub-query of `batch`.
 | `definitionCount` | Number of definitions in scope. |
 | `references` | Every reference site with `view`, `line` and `kind`. |
 | `referenceCount`, `staticReferenceCount`, `dynamicReferenceCount`, `codeReferenceCount` | Reference totals, split by channel. |
+| `themeReferenceCount`, `callerMemberNameReferenceCount` | The totals of the two further channels below; present only when not zero. |
 | `sameFileCollisions` | Duplicate definitions of the same key in one file (`key`, `view`, `lines`). |
 | `referencesTruncated` | `true` when the reference list was capped at 200. |
 | `scannedFileCount`, `scannedCodeFileCount` | Markup files and C# files read. |
@@ -83,7 +85,11 @@ The `kind` of a reference tells you which channel it came through:
 
 - `static` - `{StaticResource Key}`, resolved once at load time.
 - `dynamic` - `{DynamicResource Key}`, re-resolved on every lookup, so it survives a theme swap. A brush that is swapped with the theme must be referenced dynamically.
+- `theme` - WinUI's `{ThemeResource Key}`.
 - `code` - a C# string literal whose text equals the key, the `TryFindResource` channel, reported with its file and line.
+- `callerMemberName` - a C# member whose name is the key and that reads it through a `[CallerMemberName]` accessor indexing a resource dictionary or calling `FindResource` with that parameter, reported at the call site.
+
+A markup extension the solution itself derives - directly or through its own types - from `StaticResourceExtension` or `DynamicResourceExtension` (for example a `{ui:ThemeResource Key}`) counts as its base's kind, `static` or `dynamic`.
 
 Only same-file duplicates are reported as collisions: in a compiled resource dictionary a later duplicate silently shadows an earlier one, while a same-named key in a *different* file is usually a legitimate theme pair.
 
@@ -104,9 +110,9 @@ The `note` distinguishes four states: the key is not found anywhere in the marku
 
 Note: the tool reads the current `.xaml`/`.axaml`/`.cs` files on disk (`bin`, `obj` and `.vs` are excluded). It is never stale after an edit, needs no `refresh_session`, and works on recalled sessions.
 
-Note: only string keys are in scope. A structural `x:Key="{x:Type ...}"` and the long form `{StaticResource ResourceKey=...}` are not seen; XML-commented markup is ignored.
+Note: only string keys are in scope. A structural `x:Key="{x:Type ...}"` is not seen; the long form `{StaticResource ResourceKey=...}` and the element `<StaticResource ResourceKey="..." />` are read. XML-commented markup is ignored.
 
-Note: fan-in comes from two channels - the solution's markup and C# string literals equal to the key. A matching literal is not by itself proof of a resource lookup: it may be a test assertion or a documentation `cref` naming a same-named converter type. Still invisible are a key assembled at runtime (interpolated or concatenated), a source file that is not `.cs`, and a third-party library template that resolves the key from its own assembly. Zero references means "verify before deleting", not proof.
+Note: fan-in comes from the solution's markup and its C#. In markup: `{StaticResource}`, `{DynamicResource}`, WinUI's `{ThemeResource}` and the derived extensions above. In C#: string literals equal to the key, and members read through a `[CallerMemberName]` accessor (matched by name, not by type). A matching literal is not by itself proof of a resource lookup: it may be a test assertion or a documentation `cref` naming a same-named converter type. Still invisible are a key assembled at runtime (interpolated or concatenated), a source file that is not `.cs`, a resource-extension subclass that ships in a referenced library, and a third-party library template that resolves the key from its own assembly. Zero references means "verify before deleting", not proof.
 
 Availability: in the default tool set; usable as a sub-query of `batch`.
 
@@ -193,6 +199,8 @@ Note: on a multi-targeted solution, the bundle is deduplicated to one logical pr
 
 Note: when several types share a name the goal names, every one of them renders. A same-named type that the ranking left out is not added.
 
+Note: the bundle renders as `get_context` does: a type the budget reduces to structure lists the signatures of the methods it does not render as method blocks; a goal naming an interface pulls its implementing types, for a generic interface also those that close it through a base class or another interface; and a partial type renders one block per project it is compiled into.
+
 Availability: in the default tool set; usable as a sub-query of `batch`.
 
 ### `prepare_task`
@@ -203,24 +211,26 @@ Availability: in the default tool set; usable as a sub-query of `batch`.
 |---|---|---|---|---|
 | `sessionId` | string | yes | - | The session id returned by `analyze_solution`. |
 | `goal` | string | yes | - | The task description; name the relevant types and methods in it. |
-| `facet` | string | no | `null` | The task axis (same values as `pack_for_task`). On a profile-aware server (`aicb mcp --db-path`) the facet's template shapes the render; a work-style trailer is always appended. |
+| `facet` | string | no | `null` | The task axis (same values as `pack_for_task`). On a server with a config DB - a plain `aicb mcp` resolves the standard one; `--db-path` names another - the facet's template shapes the render (`render: template`, the default); only a server without a config DB renders `lean`. A work-style trailer is always appended. |
 | `budget` | integer | no | `null` | Token budget (floor 8000). Applies to both render paths. The goal-named seeds are always kept; the bundled covering tests and siblings are budget-bound and are dropped under a tight budget, with a leading comment naming the drops. Precedence: this parameter, then the MCP profile, then the template, then the global default. Omitted, the bundle renders against a ceiling: the profile's token budget, else about 10000 tokens. |
 | `includeTests` | boolean | no | `true` | Include the test methods that cover the seeded symbols. |
 | `includeSiblings` | boolean | no | `true` | Include one or two naming or file-convention siblings of the seeded types. |
-| `includeQualityMetrics` | boolean | no | `false` | Emit the `<QUALITY_HOTSPOTS>` section and `complexity=""`/`ce=""` attributes. Applies to the lean render path only. |
-| `lean` | boolean | no | `true` | Lean slice on the lean render path. Ignored on the profile-aware slot-template render path, which the active profile controls. |
+| `includeQualityMetrics` | boolean | no | `false` | Emit the `<QUALITY_HOTSPOTS>` section and `complexity=""`/`ce=""` attributes. Applies to the lean render path only; on a default server, which renders the template path, it has no effect. |
+| `lean` | boolean | no | `true` | Lean slice on the lean render path. Ignored on the profile-aware slot-template render path, which the active profile controls; on a default server, which renders the template path, it has no effect. |
 
 **Response.** The Markdown bundle, led by a one-line manifest so you can see what was covered - and what was not:
 
 ```
-<!-- prepare_task | goal: "..." | seeds: ... | tests: ... | siblings: ... | render: lean -->
+<!-- prepare_task | goal: "..." | seeds: ... | tests: ... | siblings: ... | render: template -->
 ```
 
-Each bundled test carries its evidence tier: `(invokes)` means the test calls the symbol, `(invokes-via)` means it reaches the symbol through one method or constructor it calls, and `(name)` is a name guess. When nothing in the list invokes the symbol at either hop, the manifest says so. At most 40 covering tests are bundled per bundle; a cap is disclosed as `(+N more, capped)`. An axis that found nothing reads `(none)`. The `render` segment reads `lean` or `template`.
+Each bundled test carries its evidence tier: `(invokes)` means the test calls the symbol, `(invokes-via)` means it reaches the symbol through one method or constructor it calls, and `(name)` is a name guess. When nothing in the list invokes the symbol at either hop, the manifest says so. At most 40 covering tests are bundled per bundle; a cap is disclosed as `(+N more, capped)`. An axis that found nothing reads `(none)`. The `render` segment reads `template` on a server with a config DB, the default, and `lean` without one.
 
 Note: on a multi-targeted solution, the bundle is deduplicated to one logical project per name, using the newest target framework's instance.
 
 Note: when several types share a name the goal names, every one of them renders. A same-named type that the ranking left out is not added.
+
+Note: on both render paths, a type the budget reduces to structure lists the signatures of every method it declares that does not already render as a method block (up to 80 lines, then `(+N more)`), and where quality metrics are rendered its `members` counts what the type declares in its project. On the template path, a type present in several projects (a linked file, a namesake, each target framework of a multi-targeted project) lists and counts only its own project's declaration in each block. On the lean path, the bundle also follows `get_context` for interfaces (implementing types pulled in, through a base class or another interface too) and for partial types (one block per project).
 
 Availability: in the default tool set; not usable as a sub-query of `batch` (it is a heavyweight renderer).
 
@@ -239,7 +249,7 @@ Note: this renders the whole solution. On a large codebase the default render is
 
 Note: a `format` value that is neither `tag` nor `yaml` counts as omitted - the profile's format applies - and the answer starts with a note naming the ignored value (`Note: format '<value>' is not a known value ('tag' or 'yaml') and was ignored ...`).
 
-Note: on a profile-aware server (`aicb mcp --db-path`), the active MCP profile drives the render - the chosen facet's template (detail presets, graphs, line numbers, quality metrics) is used. Without a profile, the full default render is used.
+Note: on a profile-aware server (a plain `aicb mcp`, which resolves the standard config DB, or one started with `--db-path`), the active MCP profile drives the render - the chosen facet's template (detail presets, graphs, line numbers, quality metrics) is used. Without a profile, the full default render is used.
 
 Note: the work-style trailer is appended to the response only; it is never written into the `outputPath` file.
 
@@ -339,7 +349,7 @@ Availability: not in the default tool set; expose it with the `Full Select` prof
 | `directUsages` | Number of direct users or callers - the `directCount` of `impact_of_change`, one per declaration. |
 | `transitiveImpact` | Number of dependents through chains - the `transitiveCount` of `impact_of_change`, one per declaration. |
 | `risk` | `none`, `low`, `medium` or `high`, graded as `impact_of_change` grades it - test callers count toward the usage numbers but not toward the risk. |
-| `implementations` | The types implementing the symbol, when it is an interface. Test doubles are listed too; `find_implementations` filters them by default. |
+| `implementations` | The types implementing the symbol, when it is an interface - for a generic interface also those that get it through a base class or another interface. Test doubles are listed too; `find_implementations` filters them by default. |
 | `invokesTotal` | How many of the covering tests are strong matches. |
 | `dispatchTotal` | How many reach the symbol through an interface or abstract member. Omitted at 0. |
 | `coveringTests` | The covering test methods, each with its evidence tier. |
@@ -466,6 +476,8 @@ Note: this answer is triage-filtered on both axes. Findings the solution marked 
 Note: `suppressed` counts what both axes removed together, so it is not a count of sidecar entries. And `title` is producer text computed before filtering, so on a partially filtered insight it still names the pre-filter total - `detailsCount` plus `suppressed` are the real split.
 
 Note: insights that depend on facts computed live during analysis (for example the unresolved-binding findings) are absent on a session recalled from a saved snapshot.
+
+Note: the unused-type finding applies the type exemptions of `find_dead_code`, so a MEF part is not reported. The side-effect-concentration and security-sensitive-call findings judge methods only; the top-level-statement units that `calls_external` and `find_by_side_effects` list are not part of them.
 
 Availability: in the default tool set; usable as a sub-query of `batch`.
 
