@@ -11,10 +11,11 @@ default profile have a new description (`calls_external`, `explain_symbol`, `fin
 `find_dead_code`, `find_implementations`, `find_resource_usages`, `instantiation_sites`,
 `resolve_injection`); no tool or parameter was added, removed or made required. **Scripts that
 compare `find_implementations`' `via`:** on an open query (`IHandler`, `IHandler<T>`) some items
-that said `via: "back-edge"` now say `via: "inherited"`. A snapshot or saved session from an
+that said `via: "back-edge"` now say `via: "inherited"`, and on a closed query
+(`IHandler<Saved>`) such an item carries no `via`. A snapshot or saved session from an
 earlier version is analyzed afresh the first time it is used. A codebase remembered with an
-earlier version is recalled as `stale`, and until `refresh_remembered` its answers say what the
-old snapshot does not know (`VIEWS NOT KNOWN`, `GENERATED CODE NOT KNOWN`, `TOP-LEVEL CREATIONS
+earlier version is recalled as `stale`, and until `refresh_remembered` the answers concerned say
+what the old snapshot does not know (`VIEWS NOT KNOWN`, `GENERATED CODE NOT KNOWN`, `TOP-LEVEL CREATIONS
 NOT KNOWN`, `TOP-LEVEL EFFECTS NOT KNOWN`), also on a solution without views. The first open of
 each solution after the update takes the full design-time build once. The configuration database
 is not changed.
@@ -26,9 +27,9 @@ is not changed.
   a type injected in a `_ViewImports.cshtml` is credited to that file once, and `@attribute [X]` is
   a use of `X`. `find_usages`, `impact_of_change`, `find_dead_code` and `find_production_dead`
   follow.
-- **Views that were not read are named:** where the generator did not compile some views (a
+- **Views that were not read are counted:** where the generator did not compile some views (a
   runtime-compiled view in a plain `Microsoft.NET.Sdk` project, a generator that did not run), a
-  `VIEWS NOT READ` note says so on a zero fan-in and on the dead-code candidate lists. A session
+  `VIEWS NOT READ` note gives their number and projects on a zero fan-in and on the dead-code candidate lists. A session
   restored with `recall_codebase` carries the same note.
 - **Editing a `.cshtml` or `.razor` file marks the session stale**, and `refresh_session`
   analyzes it again; before, a `.razor` edit went unnoticed.
@@ -41,9 +42,8 @@ is not changed.
 - **Avalonia `.axaml` views are read like WPF `.xaml`:** a handler wired to an event
   (`Click="OnSave"`) is a use of the code-behind method, and a property set in markup (attribute,
   property element, `Setter`, attached property) is a use of that property. A bare `Setter` under a
-  `Style Selector` names a property of the type the selector's last segment names (`Button` in
-  `Button.accent`), and a nested `^` style inherits its parent's type; a selector naming several
-  types or none records nothing. A `Classes.accent="True"` toggle is not counted as a use of a
+  `Style Selector` is a use of the styled type's property, also in a nested `^` style; a selector
+  naming several types or none records nothing. A `Classes.accent="True"` toggle is not counted as a use of a
   `Classes` member.
 - **Nested types written `prefix:Outer+Inner`** are read in `{x:Type}`, `x:Static`, `DataType`,
   `TargetType`, `d:DesignInstance`, attached-property owners and markup extensions, so
@@ -59,8 +59,8 @@ is not changed.
 
 - **`find_implementations` and `impact_of_change` find the types that implement a generic
   interface of the solution through a base class, another interface or further down**
-  (`Update : HandlerBase<Saved>`, `Leaf : Update`); before, only types that declare the interface
-  themselves were listed. Such items say `via: "inherited"`. A closed query no longer lists the
+  (`Update : HandlerBase<Saved>`, `Leaf : Update`); before, many of them were missing. On an open
+  query such items say `via: "inherited"`. A closed query no longer lists the
   subclasses of an unrelated base class of the same name, and a non-generic interface nested in a
   generic type also gets its indirect implementers.
 - **The context tools pull them too:** `get_context`, `pack_for_task` and `prepare_task` centered
@@ -115,7 +115,8 @@ is not changed.
 
 - **A qualified member query reads every segment** (`Outer.Inner.Member`) in `find_usages`,
   `impact_of_change`, `find_tests_for`, `symbol_signature`, `symbol_metrics` and the context tools;
-  a qualifier that names none of the same-named types answers `not_found` with a note naming them,
+  a qualifier that names none of the same-named types answers `not_found`, in `find_usages` and
+  `impact_of_change` with a note naming them,
   and `find_usages` adds `namesakes` where the type part still names several types.
   `Outer<T>.Inner.Member` resolves.
 - **A generic type parameter is no longer a use of a type named like it** (a `struct T`), in
@@ -140,10 +141,11 @@ is not changed.
   project with unresolved names points into, with a `submodules` list and the
   `git submodule update --init` command.
 - **A source generator referenced from another configuration or platform output** of a project in
-  the solution is reported as `not-built` instead of as an unrestored package; where that project
+  the solution is reported as `not-built` (or `not-found` where it cannot be told whether that
+  project holds a generator) instead of as an unrestored package; where that project
   declares no generator, the entry is gone.
-- The error count is the same on repeated runs of a solution in which a referenced C# project has
-  an unresolved type; before, some runs reported extra errors.
+- Repeated runs of a solution in which a referenced C# project has an unresolved type no longer
+  report different error counts; before, some runs reported extra errors.
 
 ### Faster
 
@@ -151,9 +153,9 @@ is not changed.
 - `find_production_dead` (Full Select profile) answers in seconds on large solutions where it ran
   for minutes, for every `kinds` value.
 - Two more solution shapes open again quickly from the design-time build cache: a project that
-  lists a compile item without a file, and a `.sln` with Visual Studio Web Site entries. Such an
-  entry no longer counts as a failed design-time build when the open watched the solution file and
-  no project lost a reference; a missing `.csproj` is still a failure, and Web Site entries in a
+  lists a compile item without a file, and a `.sln` with Visual Studio Web Site entries. In most
+  cases such an entry no longer counts as a failed design-time build; it still does when a project
+  lost a project reference. A missing `.csproj` is still a failure, and Web Site entries in a
   `.slnx` are not recognized.
 
 ### Other changes

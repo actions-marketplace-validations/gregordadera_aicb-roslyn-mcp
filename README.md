@@ -140,8 +140,8 @@ back quickly, and the context tools pick and render the part of the code a task
 needs. This does **not** mean that every possible answer or runtime relationship is
 known in advance.
 
-Each `aicb mcp` process keeps its own live session per solution; a second server
-process analyzes on its own. The desktop app, CLI and MCP server give their answers
+Each `aicb mcp` process keeps its own live sessions; a second server process
+analyzes on its own. The desktop app, CLI and MCP server give their answers
 from the same engine and can share configuration and saved snapshots through the
 local database, but each keeps its own live analysis. After you edit source files,
 the next refresh usually updates only what changed, without loading the solution
