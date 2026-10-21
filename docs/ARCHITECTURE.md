@@ -84,7 +84,7 @@ aggregation on top of it, including:
 - call, type, implementation and construction relationships presented at symbol
   level instead of as an unaggregated list of positions;
 - test discovery and evidence tiers;
-- Microsoft DI registration and constructor-injection relationships;
+- Microsoft DI and MEF registrations and constructor-injection relationships;
 - selected XAML/AXAML bindings, resources and type references;
 - side-effect and external-call classification;
 - layers, cycles, quality insights, metrics and change-policy checks;
@@ -254,8 +254,8 @@ proof that code is unused.
 
 ### Dependency injection
 
-AICB reads statically recognizable Microsoft-DI-shaped registrations and
-constructor injection. A registration whose type is produced at runtime is reported
+AICB reads statically recognizable Microsoft-DI-shaped registrations, MEF export
+attributes and constructor injection. A registration whose type is produced at runtime is reported
 as dynamic, unknown or factory-shaped rather than guessed. Other containers and
 runtime scanning need separate verification.
 
