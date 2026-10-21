@@ -4,7 +4,7 @@ Versions follow `Major.Minor.Series.Build`. The build number rises by one for ev
 change that lands, so gaps between published versions are normal - not every build is
 released.
 
-## 0.5.504.1 (unreleased) - Razor views and Avalonia markup count as usage, every implementer of a generic interface is found, and Program.cs counts in full
+## 0.5.504.1 (2026-10-21) - Razor views and Avalonia markup count as usage, every implementer of a generic interface is found, and Program.cs counts in full
 
 **Who is affected.** Everyone on the MCP server: reconnect your client once - 8 tools of the
 default profile have a new description (`calls_external`, `explain_symbol`, `find_by_side_effects`,
