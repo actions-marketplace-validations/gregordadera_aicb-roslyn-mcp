@@ -54,7 +54,7 @@ A snapshot is a persisted copy of the analyzed model of a solution inside an aic
 
 **Response.**
 - `sessionId` - the session that was compared.
-- `note` - present only when the filter owes a disclosure; omitted otherwise.
+- `note` - present when the filter owes a disclosure, or when the baseline snapshot looks like the session's own state (see below); omitted otherwise.
 - `baselineSnapshotId`, `baselineName`, `baselineCreatedUtc` - which snapshot was used as the baseline.
 - `snapshotsBack`, `totalSnapshots` - the index used and the size of the history.
 - `diff` - `addedTypes`, `removedTypes`, `changedTypes`, plus `isIdentical` and `totalChangeCount`. Each changed type carries `typeName`, `addedMethods`, `removedMethods` and `changedMethodSignatures`; a signature entry gives `methodName`, `leftSignature`, `rightSignature` and the flags `returnTypeChanged`, `parametersChanged`, `accessibilityChanged`, `staticChanged`.
@@ -62,7 +62,8 @@ A snapshot is a persisted copy of the analyzed model of a solution inside an aic
 **Notes and limits.**
 - At least one earlier `save_session` for the same solution is required; otherwise the call is rejected with a message telling you to call `save_session` first. A `snapshotsBack` outside the saved history is rejected with the number of available snapshots.
 - The filter disclosure is the important property. When a filter empties a diff that did have changes, `note` says so and names the axis that missed, because `isIdentical: true` then describes the filtered view and not the solution. A changed type whose method lists the `methodName` filter emptied is dropped from the answer, so an empty view is never evidence that the method is unchanged.
-- On a diff that was already empty there is no note, and none is owed: "your filter matched nothing" and "nothing changed" are the same state there, so a mistyped and a real name answer identically. Check the spelling with `find_symbol` rather than reading that agreement as confirmation.
+- On a diff that was already empty the filter owes no note: "your filter matched nothing" and "nothing changed" are the same state there, so a mistyped and a real name answer identically. Check the spelling with `find_symbol` rather than reading that agreement as confirmation.
+- A snapshot saved from the same source state as the session (the file-set hash is unchanged) and an empty diff get a note: the diff most likely compares that state with itself, so `isIdentical: true` is not evidence that a change kept the solution's shape. Save the snapshot before the change, edit, call `refresh_session`, then compare. When the snapshot with that hash was saved by another analyzer build, the note says so whether or not the diff is empty: a difference can come from the analyzer instead of the source.
 
 ### `diff_public_contract`
 
@@ -367,7 +368,7 @@ These three tools browse and import the master data of an aicb database rather t
 
 ### `install_agent_hooks`
 
-**Purpose.** Install the aicb symbol guard into this project for an agent harness, so that a C#-symbol question is **refused** on a text search and redirected to the tool that answers it.
+**Purpose.** Install the aicb symbol guard into this project for an agent harness, so that a C#-symbol question is **refused** on a text search and redirected to the tool that answers it (with the two exits described under "Two ways past the refusal").
 
 **When to use it.** When your client offers it, or when you want the guard without re-running the full `aicb init`.
 

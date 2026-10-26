@@ -129,7 +129,7 @@ Only `Stale` produces text, and the response is otherwise left byte for byte unc
 
 The disclosure has two grammars, one per response shape:
 
-- **JSON responses** get a `staleness` member spliced into the object. A response that is structured but not a JSON object (a top-level array) is left untouched.
+- **JSON responses** get a `staleness` member spliced into the object. A top-level JSON array (for example `list_insights`) stays the array the tool returned; the disclosure follows it as a text block of its own, `{"staleness": {...}}`. A client that joins all text blocks of an answer and parses them as one JSON document must read the blocks separately.
 - **Markdown responses** get a leading `<!-- staleness: ... -->` comment, so the caveat is visible before the document rather than after it.
 
 A plain stale disclosure looks like this:
@@ -170,7 +170,7 @@ The fields are:
 |---|---|
 | `stale` | `true` when the answer comes from a graph behind the disk, `false` when the automatic path repaired it. |
 | `autoRefreshed` | Present and `true` when the server re-analyzed before answering. |
-| `mode` | Which path the re-analysis took: `incremental` (document texts replayed, no workspace reload) or `full-reload`. Only present with `autoRefreshed`. |
+| `mode` | Which path the re-analysis took: `incremental` (document texts replayed, or C# files added or removed in place, no workspace reload) or `full-reload`. Only present with `autoRefreshed`. |
 | `autoRefreshFailed` | The exception **type** that ended a failed automatic attempt (not a message). |
 | `checkedAtUtc` | When the check last looked at the disk. Absent after a successful automatic re-analysis. |
 | `hint` | The same sentence as the Markdown comment: what happened and what to do. |
@@ -182,7 +182,7 @@ Notes:
 - `refresh_session` is not exempt: the check runs **after** the tool, so a successful refresh classifies as current and produces no note - while a file written *during* the re-analysis is still disclosed.
 - A result that is an error is not decorated; its age is irrelevant and a note would only crowd out the failure.
 - A recalled session gets a different remedy in the same place: the note points to `refresh_remembered` instead of `refresh_session`, because `refresh_session` rejects a recalled session.
-- `get_diagnostics` additionally leads its answer with `verdict: "stale"` and a `verdictReason` when it computed from a graph known to be behind the disk - placed before the counts so that `errorCount: 0` is not read as a clean bill.
+- `get_diagnostics` additionally leads its answer with `verdict: "stale"` and a `verdictReason` when it computed from a graph known to be behind the disk - including a project whose restore rewrote its `project.assets.json` after the session was loaded - placed before the counts so that `errorCount: 0` is not read as a clean bill.
 
 **Never infer freshness from which tool you called.** Read the disclosure that the response carries.
 
@@ -251,14 +251,14 @@ A session has at most **one** refresh in flight. `refresh_session` and the autom
 It returns `{ changed, reason, session, mode }`:
 
 - `changed` - `false` when nothing was re-analyzed; the `reason` then says why (the file-set hash was unchanged, or every file that moved was touched without a content change).
-- `mode` - `incremental` when document texts were replayed without a workspace reload, otherwise `full-reload`. It is **absent** when nothing was re-analyzed.
+- `mode` - `incremental` when document texts were replayed, or C# files added or removed in place, without a workspace reload, otherwise `full-reload`. It is **absent** when nothing was re-analyzed.
 - `session` - the session metadata after the refresh.
 
 Notes:
 
 - Calling `refresh_session` after editing is cheap to do speculatively: an unchanged file set skips the expensive re-analysis. A file whose timestamp moved while its text is still the analyzed text (a save without an edit) does not count as a change either.
 - The incremental path can stop engaging without any visible symptom - answers stay correct, calls just get slow again. The `mode` field is how you notice.
-- `force: true` costs a full workspace reload. Use it after a restore or build that was meant to repair unresolved references: that state lives in build output, which the file-set check cannot see, so an ordinary call can legitimately answer "unchanged". After a restore or build, an analysis that reported unresolved references retries once by itself; `force` is the deterministic way to demand it.
+- `force: true` costs a full workspace reload. Use it after a restore or build that was meant to repair unresolved references: that state lives in build output, which the file-set check cannot see, so an ordinary call can legitimately answer "unchanged". A restore that rewrote a project's `project.assets.json` after the session was loaded is the exception: an ordinary call reloads through MSBuild for it and names the project in `reason`. After a restore or build, an analysis that reported unresolved references retries once by itself; `force` is the deterministic way to demand it.
 - A recalled session is rejected: `refresh_session` has no live workspace to refresh. Use `refresh_remembered` (or `analyze_solution`).
 
 ## 3.9 Staleness or incompleteness?

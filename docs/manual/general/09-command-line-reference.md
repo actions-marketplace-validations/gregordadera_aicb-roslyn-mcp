@@ -87,7 +87,7 @@ Behavior:
 
 Note: `init` has no preview mode. `--force` is broader than "overwrite what is already there": it also replaces an `aicb` entry that you deliberately pointed at a wrapper script or a debug build, and it rewrites the harness wiring back to its canonical form.
 
-Note: the harness detection on `auto` is deliberately conservative. A Claude Code user whose `.claude/` folder contains only their own `skills/` directory is not detected, because the detection must not read a marker that `init` itself created. The message `No agent harness detected here, so no symbol guard was installed and this run registered the server only in .mcp.json (read by Claude Code).` is not a failure - pass `--hooks claude-code` explicitly.
+Note: the harness detection on `auto` is deliberately conservative. A `CLAUDE.md` in the project directory counts as evidence of Claude Code. Without one, a Claude Code user whose `.claude/` folder contains only their own `skills/` directory is not detected, because the detection must not read a marker that `init` itself created. The message `No agent harness detected here, so no symbol guard was installed and this run registered the server only in .mcp.json (read by Claude Code).` is not a failure - pass `--hooks claude-code` explicitly.
 
 The concepts behind these artifacts - what the symbol guard does, how the MCP client is wired, and how to remove it - are described in the MCP manual.
 

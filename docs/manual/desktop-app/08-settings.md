@@ -674,7 +674,7 @@ What the stages do, per pipeline:
 | `Max Token Budget (Floor 8000)` | `60000` | Hard cap for the generated document size in tokens. Values below 8000 are raised to the floor. |
 | `Max overshoot when the selection exceeds the budget (%)` | `50` | How far the output may exceed the budget before over-budget selected types are dropped. The ceiling is `budget × (1 + %/100)`. `0` means a hard cap (drop down to the budget exactly); a large value effectively never drops a selected type. Clamped to 0-1000. The least-relevant selected types are first reduced to structure, then dropped down to the ceiling; the focal type always keeps its code. The finished render is measured and pruned again if it still exceeds the ceiling. |
 | `Auto-bypass at read-only snapshot tabs` | on | Snapshot tabs skip the trimming pipeline so they stay identical to the saved state. |
-| `Show budget header in MD output` | off | Prefixes the output with an HTML comment containing budget statistics (token budget / used / trimmed). |
+| `Show budget header in MD output` | off | Prefixes the output with an HTML comment containing budget statistics (token budget, estimated size after trimming, trimmed methods and, under an enforced budget, the types dropped or reduced to structure). |
 
 **`Snapshot Auto-Reload`**
 

@@ -101,7 +101,7 @@ The process default is the DB given with `--db-path`, or the standard configurat
 
 This is what makes the desktop application's settings apply automatically when an agent works on the same solution: the per-solution namespace exclusions, test detection and layer profile, the active quality profile, and your custom entities are all read from the same database, with no path to pass.
 
-A server without a usable database is not broken, but it is **profile-blind**: it falls back to the built-in default profile's pool, and tools that genuinely need a database answer with `dbPath is required (...)` naming what the path was for. `usage_report` answers `available: false` in that state.
+A server without a usable database is not broken, but it is **profile-blind**: it falls back to the built-in default profile's pool, and tools that genuinely need a database answer with `dbPath is required (...)` naming what the path was for. `usage_report` answers `available: false` in that state. The insight tools say so in their answer: `configDbNote` names the built-in default quality profile as the one that judged.
 
 ### The per-solution sidecar
 
@@ -188,7 +188,7 @@ Detection is on **tool-name level**. A new parameter added to an existing tool i
 
 ### ANALYZER DRIFT
 
-The third probe answers the axis the other two cannot see: this binary's build commit against the HEAD of the repository that holds the solution you asked it to analyze. A fact producer that got smarter since this build shows up here even though tool names and source files are unchanged. The probe reports all four outcomes, not only the bad one:
+The third probe answers the axis the other two cannot see: this binary's build commit against the HEAD of the repository that holds the solution you asked it to analyze. A fact producer that got smarter since this build shows up here even though tool names and source files are unchanged. The probe reports every outcome, not only the bad one - the four measured ones below, and an unmeasured one described after the table:
 
 | Report | Meaning | What to do |
 |---|---|---|
@@ -197,9 +197,9 @@ The third probe answers the axis the other two cannot see: this binary's build c
 | `Analyzer: this binary was built from a commit N commits BEHIND ... but NOT ONE of the commits behind touches an analyzer project` | The binary is behind, but the analyzer's own code is unchanged across that distance | Nothing - the gap is no reason to rebuild |
 | `⚠️ ANALYZER DRIFT: ... N of them touch an analyzer project` | The analyzer's code moved since this build; facts it produces - fan-in, dead code, side effects - may be the older analyzer's, including a zero that the newer one fills | Rebuild or reinstall the standalone tool |
 
-If the distance cannot be characterized - for example the second measurement failed - the warning is kept without the qualifier, so a distance that cannot be judged stays as loud as before. The probe is silent when there is no analyzed session, when a repository does not know this build commit (any foreign solution), and whenever the binary carries no commit id. Public installer, ZIP and dotnet-tool release builds deliberately omit that id, so analyzer-drift output is unavailable there.
+If the distance cannot be characterized - for example the second measurement failed - the warning is kept without the qualifier, so a distance that cannot be judged stays as loud as before. The probe is silent when there is no analyzed session, when a repository does not know this build commit (any foreign solution), and whenever the binary carries no commit id. A git call that does not answer within two seconds is not silence: the line reads `Analyzer: drift UNKNOWN - git did not answer within 2 s in <directory>, ...` and asks you to call `server_info` again. If only the second measurement timed out, the warning stays and says that whether an analyzer project is touched is unknown. Public installer, ZIP and dotnet-tool release builds deliberately omit that id, so analyzer-drift output is unavailable there.
 
-The measurement is a local, read-only `git rev-list --count` query in the solution's directory, with a two-second ceiling and fail-open behavior on any error. It probes at most four distinct solution directories and stops at the first repository that can resolve the commit.
+The measurement is a local, read-only `git rev-list --count` query in the solution's directory, with a two-second ceiling; a timeout is reported as `drift UNKNOWN`, any other error stays silent. It probes at most four distinct solution directories and stops at the first repository that can resolve the commit.
 
 Besides these three drift signals, every session-bound answer carries a **staleness** note when source files changed after the analysis - that is a different signal with a different remedy; see "Sessions and staleness".
 
@@ -213,7 +213,7 @@ The server records one row per tool invocation into the local configuration data
 |---|---|
 | Timestamp | UTC time of the call |
 | Tool name | The tool that was called, `(unknown)` when it could not be determined |
-| Session reference | **12 hexadecimal characters** from a SHA-256 hash of the session reference - never the raw path or id |
+| Session reference | **12 hexadecimal characters** from a SHA-256 hash of the session reference - never the raw path or id. A solution path is normalized first, so the slash and backslash spellings of one path give one reference |
 | Success / error | Whether the call succeeded, and whether it failed |
 | Error class | The exception **type** name |
 | Result size | The summed length of the text blocks of the answer; empty when the answer carried no text |
@@ -223,11 +223,15 @@ The server records one row per tool invocation into the local configuration data
 | Protocol version | The negotiated protocol revision |
 | Alias applied | Set when the server accepted an alternative parameter name in place of the tool's real one |
 | Facet | The resolved facet id the call addressed, or `(unresolved)` for a spelling the catalog does not know; empty when no facet was given |
-| Error message | The failing exception's own message - the one free-text field (see below) |
+| Error message | The failing exception's own message - the one free-text field (see below). A call that failed because it named an argument the tool does not have ends the message with `[unrecognized arguments: <names>]` (at most three names) |
 | Child calls | For a `batch` or `measure` call: a per-tool tally of what it dispatched, for example `{"find_usages":{"n":3,"e":0}}` |
 | Solution size | The number of projects and files of the solution the call was answered against; empty when the call resolved no session |
+| MCP profile | The id of the MCP profile the server was serving when it admitted the call; empty for `aicb call` |
+| Auto-refresh mode | The mode the server runs (`off`, `reactive`, `proactive`), after `AICB_MCP_AUTO_REFRESH`; empty for `aicb call` |
+| Unrecognized arguments | The names of arguments the call sent that the tool does not have (at most three), on success and failure; names only, never values |
+| Client session | A random 12-hex id drawn once per server start, so one id is one MCP connection; it does not separate the subagents of one client session; empty for `aicb call` |
 
-What is **not** recorded: argument values, source code, file paths, and the content of any answer. The session reference is only read in order to be hashed; a `facet` value is only read in order to be mapped to a fixed catalog id.
+What is **not** recorded: argument values, source code, file paths, and the content of any answer. Argument names are recorded only where the tool does not declare them. The session reference is only read in order to be hashed; a `facet` value is only read in order to be mapped to a fixed catalog id.
 
 The row is written for **every** call on the `tools/call` pipeline, including calls the active profile refuses. A refused call is a curation signal, not noise, so it is recorded like any other.
 
@@ -237,7 +241,7 @@ Recording is **fail-open in both directions**: a telemetry defect can never brea
 
 The rows go into the `tool_calls` table of the configuration database - the same file the desktop application uses, at `%APPDATA%\AIContextBuilder\user-data\aicb.acb` unless `--db-path` says otherwise. The table carries an index on the tool name and one on the timestamp.
 
-For ad-hoc queries, the columns are: `id`, `ts`, `tool_name`, `session_hash`, `ok`, `is_error`, `error_class`, `result_chars`, `duration_ms`, `client`, `server_ver`, `protocol_version`, `client_name`, `client_version`, `alias_applied`, `facet`, `error_message`, `child_calls`, `solution_projects`, `solution_files`. The legacy `client` column is no longer written - the protocol identity replaces it.
+For ad-hoc queries, the columns are: `id`, `ts`, `tool_name`, `session_hash`, `ok`, `is_error`, `error_class`, `result_chars`, `duration_ms`, `client`, `server_ver`, `protocol_version`, `client_name`, `client_version`, `alias_applied`, `facet`, `error_message`, `child_calls`, `solution_projects`, `solution_files`, `mcp_profile`, `auto_refresh_mode`, `unrecognized_args`, `client_session`. The legacy `client` column is no longer written - the protocol identity replaces it.
 
 A server **without** a usable database records nothing at all: it gets a no-op sink, no file is created, and `usage_report` answers `available: false` with a note.
 
@@ -250,7 +254,7 @@ A server **without** a usable database records nothing at all: it gets a no-op s
 | `topTools` | `30` | Cap on the per-tool breakdown, ranked by call count. Clamped to 1..200 |
 | `sinceDays` | not set | Only count calls from the last N days. Clamped to 1..3650; without it the whole log is read |
 
-The answer contains overall totals (total calls, error count and rate, distinct tools and sessions, first and last timestamp, the clients and server versions seen) and a per-tool breakdown ranked by call count:
+The answer contains overall totals (total calls, error count and rate, distinct tools and sessions, client connections, first and last timestamp, the clients and server versions seen) and a per-tool breakdown ranked by call count:
 
 | Field | Meaning |
 |---|---|
@@ -259,6 +263,8 @@ The answer contains overall totals (total calls, error count and rate, distinct 
 | `avgResultChars`, `p50ResultChars`, `p90ResultChars`, `maxResultChars` | Response size distribution in characters |
 | `errorClasses` | Histogram of the exception types behind the errors. A guided `McpException` is a failure the tool raised on purpose (an expired session, an unknown token); any other type is a defect suspicion |
 | `argumentBindingErrors` | The subset of errors where the caller named an argument the tool does not have - the call never reached the tool. Neither a defect nor a refusal; a value here means the argument surface confused somebody |
+| `ignoredArgumentCalls` | Calls that answered although they sent an argument the tool does not have, so that argument had no effect - the success-side twin of `argumentBindingErrors`; omitted when there were none |
+| `clientSessions` | A total, not a per-tool field: how many MCP connections the recorded calls came from (`distinct`, `calls` - the calls that carry a connection id - and a `note`). `distinctSessions` counts session references, and on a call that passes the solution path every chat on that solution shares one; one connection id does not separate the subagents of one client session. Omitted while no call in the window carries an id |
 | `aliasApplied` | How often the tool was called with a parameter's accepted alias instead of its real name, i.e. how often the server silently corrected the caller |
 | `poolCoverage` | How much of the active tool pool this traffic covers: `poolSize`, `poolToolsFired`, the named `poolToolsNeverCalled`, plus `outOfPoolCallsIncluded` and `outOfPoolTools` |
 | `protocolVersions` | Share of calls per protocol revision, with `preInstrumentationCalls` for rows recorded before the instrumentation existed |
@@ -272,9 +278,9 @@ The answer contains overall totals (total calls, error count and rate, distinct 
 
 - The recording sits on the **`tools/call` pipeline only**.
 - A sub-query inside `batch` or `measure` does **not** get a row of its own; a recent-enough parent row carries the per-tool tally instead, reported under `subQueries`. Two boundaries of that block: a `measure` sub-query is left out (it runs the tool fully, but the caller consumes the size of the answer, not the answer), and a sub-query naming a tool the dispatch registry does not know is counted under the single literal `(unknown)` - a typo cannot grow the key space.
-- A one-shot `aicb call` invocation records nothing at all.
+- A one-shot `aicb call` writes the same row under the client name `aicb-call` when it is given `--db-path`, and nothing without one.
 
-So **every count is a lower bound**, and a tool reported at 0 was "not called through this door" rather than "not called". Read pool coverage from `poolCoverage`, not from `distinctTools`: the latter counts every tool that was called, including ones outside the current pool, so holding it against the pool size overstates coverage. A name in `poolToolsNeverCalled` carries its own note: it was never called *top-level*, and the list does not subtract the `subQueries` - a tool can appear in both.
+So **every count is a lower bound**, and a tool reported at 0 was "not called through this door" rather than "not called". Read pool coverage from `poolCoverage`, not from `distinctTools`: the latter counts every tool that was called, including ones outside the current pool, so holding it against the pool size overstates coverage. A name in `poolToolsNeverCalled` carries its own note: it was never called *top-level*, and the list does not subtract the `subQueries` - a tool can appear in both. The note also names the span the list was measured over - the window cut, the oldest recorded call in it and how long ago that was; an empty window says the span is unknown, so the list is unmeasured, not unused.
 
 `usage_report` is **not available inside `batch` or `measure`**. It is a read-only tool, but it is deliberately not part of the dispatch registry those two serve.
 
@@ -343,7 +349,7 @@ Note: this describes the aicb server itself, as shipped. The Model Context Proto
 
 ## 11.4 Installing the symbol guard into your agent harness: `install_agent_hooks`
 
-`install_agent_hooks` is the one MCP tool that writes into the configuration of the **calling harness**. It installs the symbol guard, which refuses a C# symbol question aimed at a text search and redirects the caller to the tool that answers it properly.
+`install_agent_hooks` is the one MCP tool that writes into the configuration of the **calling harness**. It installs the symbol guard, which refuses a C# symbol question aimed at a text search and redirects the caller to the tool that answers it properly (with the two exits described under "Two ways past the refusal").
 
 It is part of the navigation core in every profile, and that is deliberate: the session hint that offers this tool reaches every client, so a tool the default profile could not call would be an offer that fails when accepted.
 

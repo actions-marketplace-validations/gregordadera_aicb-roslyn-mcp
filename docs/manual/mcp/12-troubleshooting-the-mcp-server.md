@@ -169,7 +169,7 @@ The mode is set when the server starts and cannot be changed while it runs. It c
 
 - Under `reactive` (the default), a successful automatic refresh needs no action.
 - After a failed automatic refresh, call `refresh_session` explicitly.
-- After a **restore or build**, call `refresh_session` with `force: true`. The file-set check reads source files and cannot see build output, so an ordinary call may legitimately answer `changed: false`. `force` costs a full reload.
+- After a **restore or build**, call `refresh_session` with `force: true`. The file-set check reads source files and cannot see build output, so an ordinary call may legitimately answer `changed: false`. `force` costs a full reload. An ordinary call already reloads when a restore rewrote a project's `project.assets.json` after the session was loaded.
 - A recalled session (created with `recall_codebase`) has no live workspace, so `refresh_session` rejects it. Use `refresh_remembered` or `analyze_solution`.
 
 **Two different staleness axes.** Distinguish them, because the remedies differ:
@@ -314,11 +314,12 @@ The tool-pool check works on **tool names**; a new parameter on an existing tool
 ⚠️ ANALYZER DRIFT: this binary was built from a commit <N commits BEHIND | DIVERGED from (<a> ahead, <b> behind)> the HEAD of the repo it is analyzing (<directory>) - <k> of them <touches|touch> an analyzer project. Facts the analyzer produces - fan-in, dead code, side effects - may be the OLDER analyzer's, including a zero that the newer one fills. Rebuild/reinstall the standalone tool. Neither of the other two signals can see this: the staleness trailer compares SOURCE files (unchanged here) and the version/pool check compares tool NAMES (a smarter fact producer keeps every name).
 ```
 
-There are three further outcomes, and only one of them is a warning:
+There are four further outcomes, and none of them is a warning:
 
 - `Analyzer: IN SYNC with the analyzed repo - this binary was built from the current HEAD of <directory>.`
 - `Analyzer: this binary is <N commits> AHEAD of the analyzed repo's HEAD (<directory>) - built from work that repo does not have yet, so the analyzer is newer than the code, not older.`
 - A behind distance where **no** intervening commit touches an analyzer project is reported quietly, with the closing sentence `The analyzer's own code is unchanged across that distance, so the facts it produces are current and this gap is no reason to rebuild.`
+- `Analyzer: drift UNKNOWN - git did not answer within 2 s in <directory>, so this binary's build commit could not be compared with that repo's HEAD. ...` - nothing was measured, so this is neither a warning nor a proof of currency; call `server_info` again. When an earlier directory timed out and a later one was measured, the measured line adds `Not measured in <directory>: git did not answer within 2 s there, and a checkout of the same repository can stand at another HEAD.`
 
 The analyzer drift line is silent without an analyzed session, on a repository that does not know this commit (any foreign solution), and whenever the binary has no commit id. It therefore stays silent in the public release builds that deliberately omit the commit.
 
@@ -326,21 +327,21 @@ The analyzer drift line is silent without an analyzed session, on a repository t
 
 `get_diagnostics` reports the compiler errors, warnings and info messages of the session's solution - the real Roslyn build output, in seconds instead of a full `dotnet build`. It is the tool to run after `refresh_session` when you want to know whether an edit broke the build.
 
-- **Call `refresh_session` first.** The diagnostics are compiled from the session's snapshot, not from the files on disk. Under the shipped `reactive` mode the tool is refreshed for you before it answers, so the explicit call is redundant rather than wrong - and it is the only spelling that is correct in every mode. An answer computed from a graph known to be behind the disk leads with `verdict: 'stale'` and a `verdictReason` before any count.
-- **Parameters.** `sessionId`, `severityFloor` (`error`, `warning` (default), `info`, `hidden`), and `scope` (`solution` by default, or a file-path substring). An unknown `severityFloor` is rejected with the valid values. `scope` filters the result, not the work: every project is compiled either way.
+- **Call `refresh_session` first.** The diagnostics are compiled from the session's snapshot, not from the files on disk. Under the shipped `reactive` mode the tool is refreshed for you before it answers, so the explicit call is redundant rather than wrong - and it is the only spelling that is correct in every mode. An answer computed from a graph known to be behind the disk - including a restore since the load - leads with `verdict: 'stale'` and a `verdictReason` before any count.
+- **Parameters.** `sessionId`, `severityFloor` (`auto` (default), `error`, `warning`, `info`, `hidden`; `auto` lists only the errors when there are any, and `warningsNotListed` counts the warnings it left out - ask with `warning` to list them too), `scope` (`solution` by default, or a file-path substring), and `runSuppressors` (default `false`; runs the projects' DiagnosticSuppressors, as a real build does). An unknown `severityFloor` is rejected with the valid values. `scope` filters the result, not the work: every project is compiled either way.
 - **`incompleteProjects`.** A project whose compilation cannot resolve its core references is not listed in the diagnostics; it is disclosed separately, with the number of diagnostics it took with it. A freshly created, never-built worktree reports every project there - that is the honest unrestored state, not a defect. `verdict: 'inconclusive'` and `reliable: false` say so, and one `dotnet restore` or `dotnet build` makes the tool work for the rest of the session. This verdict is deliberately rare: it fires only when a strict majority of projects are incomplete.
 - **Read the counts with their rules.** `incompleteRatio` and `suppressedDiagnosticsTotal` appear whenever even one project is incomplete. `suppressedDiagnosticsTotal` spans every severity and is not deduplicated, while `errorCount` counts errors only and is deduplicated across target frameworks - a total that dwarfs the visible counts means this measured a fraction of the solution.
 - **Cascade diagnostics.** A project that resolves its own references but depends on an incomplete project can list `CS0012`, `CS0234`, `CS0246` or `CS0518` although it compiles fine on a real build. Such entries stay listed but are marked `cascadeFromIncomplete: true`, the response counts them as `cascadeClassifiedCount`, and each incomplete project names its `affectedDependents`. Do not read `errorCount` as "N real errors" without this.
 - **Reference-binding advisories.** `CS1701`/`CS1702` ("assuming assembly reference X v1 matches X v2") are filtered out on core-resolved projects and disclosed as `referenceBindingAdvisoriesSuppressed`.
 - **Restore and platform.** `unrestoredProjects` lists projects whose unresolved-name errors come with no restore output (`project.assets.json`), and its note names `dotnet restore` (or `dotnet workload restore`). `uninitializedSubmodules` names git submodules that were never initialized although the build files of a project with unresolved type or namespace names point into them - no restore or build brings those sources. `missingCompileItems` names compile items a project with errors in the answer lists without a file on disk, typically the output of a build step that did not run. `generatedCodeGaps` names code a generator or the WPF markup compiler did not write. `designTimeBuildPlatform` reports the platform decision where there is one: the platform a solution was loaded at, or why no single platform could be chosen, and a refused sidecar value.
 - **Live only.** Diagnostics are not persisted, so this needs a live session. A recalled session is rejected; use `refresh_remembered` for a live one. The list is capped at 200; the counts reflect the full set.
-- **Compiler diagnostics only.** Third-party Roslyn analyzer diagnostics are out of scope.
+- **Compiler diagnostics only.** Third-party Roslyn analyzer diagnostics are out of scope; `suppressors` names the analyzer references whose DiagnosticSuppressors did not run where the answer counts a diagnostic, and `runSuppressors: true` runs them.
 
 ### `usage_report` - what the server actually did
 
 `usage_report` reads the server-side tool-call telemetry: every `tools/call` invocation recorded in the config DB's `tool_calls` table. It is cross-client, not a transcript of one chat.
 
-**Read the scope first.** The recording sits on the `tools/call` pipeline only. A sub-query inside `batch` or `measure` records the parent call and no child row, and a one-shot `aicb call` records nothing at all. Every count is therefore a **lower bound**, and a tool at 0 was not called through this door rather than not called.
+**Read the scope first.** The recording sits on the `tools/call` pipeline only. A sub-query inside `batch` or `measure` records the parent call and no child row, and a one-shot `aicb call` writes the same row under the client name `aicb-call` when it is given `--db-path`, and nothing without one. Every count is therefore a **lower bound**, and a tool at 0 was not called through this door rather than not called.
 
 **Parameters.**
 
@@ -349,12 +350,14 @@ The analyzer drift line is silent without an analyzed session, on a repository t
 | `topTools` | Cap on the per-tool breakdown, ranked by call count. | `30`; clamped to 1..200 |
 | `sinceDays` | Count only calls from the last N days; narrows every figure, and the applied cutoff comes back as `windowSinceIso`. | whole log; clamped to 1..3650 |
 
-**What it returns.** Overall totals (calls, errors and error rate, distinct tools and sessions, first and last timestamp, the clients and server versions seen) and a per-tool breakdown: calls, errors, latency and result size, each as average, p50, p90 and maximum. The percentiles are the honest read for a right-skewed latency distribution, where one warmup call drags the average.
+**What it returns.** Overall totals (calls, errors and error rate, distinct tools and sessions, client connections, first and last timestamp, the clients and server versions seen) and a per-tool breakdown: calls, errors, latency and result size, each as average, p50, p90 and maximum. The percentiles are the honest read for a right-skewed latency distribution, where one warmup call drags the average.
 
 Several fields answer specific questions:
 
 - `errorClasses` - the exception-type histogram behind a tool's errors. `McpException` is a **guided** failure the tool raised on purpose (an expired session, an unknown policy token); any other type is a defect suspicion worth chasing.
 - `argumentBindingErrors` - how often a caller named an argument the tool does not have, so the call never reached the tool. This is neither a defect nor a refusal; it shows where a tool's argument surface confuses callers.
+- `ignoredArgumentCalls` - per tool, how often a call answered although it sent an argument the tool does not have, so that argument had no effect.
+- `clientSessions` - how many client connections the calls came from; `distinctSessions` counts session references, and every chat that passes the same solution path shares one.
 - `aliasApplied` - how often a tool was called with an accepted alias instead of the real parameter name.
 - `protocolVersions` and `clientEras` - the share of calls per protocol revision, and an (era × client) cross-tab. A null protocol version means the row predates this instrumentation (also reported as `preInstrumentationCalls`) and belongs in the denominator; a null client name means the client did not identify itself. `clientEras` is capped at 50 groups.
 - `facets` - how often each task facet was addressed. It is omitted until a call has addressed one.
@@ -373,7 +376,7 @@ No telemetry available - the server is running DB-free, or the tool_calls table 
 - `list_skills` is the capability map: every tool appears once in the pool groups (`inPool` or `outOfPool`). `uncatalogued` is a separate name-based section, not a third pool group; its tools can still be in either pool under an override. No profile menu names them, so only `AICB_MCP_TOOLS` can expose them.
 - `list_mcp_profiles` lists the profiles, their ids, their tool selections and which one is active. It needs a config DB (see above).
 - `docs()` is the server's built-in operating manual, with pages for installation, first context, tool navigation, solution configuration and the glossary.
-- `aicb call <tool>` invokes one MCP tool once from a terminal, without a client - useful to reproduce what an agent reported. Example: `aicb call server_info`. It writes nothing to the usage telemetry. Long analyses print progress to stderr as `progress: ...`, so stdout stays clean for the result.
+- `aicb call <tool>` invokes one MCP tool once from a terminal, without a client - useful to reproduce what an agent reported. Example: `aicb call server_info`. It writes to the usage telemetry only when it is given `--db-path` (under the client name `aicb-call`); without one it records nothing. Long analyses print progress to stderr as `progress: ...`, so stdout stays clean for the result.
 
 ## 12.12 What the server writes to stderr at startup
 

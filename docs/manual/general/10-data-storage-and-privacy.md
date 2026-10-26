@@ -106,6 +106,7 @@ The database carries a schema version. On start-up the application compares it w
 
 - Migrations are **forward-only**; there is no down-migration.
 - Each step runs in its own transaction. A step that fails leaves the database at its previous version with the change rolled back, so a corrected retry is safe.
+- Several instances that start at the same moment against the same database - the desktop application and the MCP servers of parallel sessions - migrate it once: an instance that comes second skips the steps another one already applied.
 - A migration takes effect immediately, not when instances are merged: the first start after an update migrates the shared database **for all running instances at once**. Older builds report a mismatch afterwards; this is expected.
 - A database written by a **newer** build than the running one must not be opened by it. The desktop application detects this before migrating and exits with a message naming the database schema version and the version this build knows, rather than writing the older shape back. The standalone MCP server tolerates the state, reports the schema deviation through its `server_info` tool, and keeps working. The stderr breadcrumb belongs to the separate configuration-drift check and appears only when `server_info` runs. `Switch Database...` refuses a file with a higher schema version as well.
 - If the schema cannot be updated, the desktop application shows the error and exits; the database is left unchanged.
@@ -343,7 +344,7 @@ The CLI and MCP process launches build argument lists without a shell and withou
 
 Opening a solution runs its MSBuild build logic to resolve references and determine what to compile - exactly like Visual Studio or `dotnet build`. Building the compilation also runs the source generators the projects reference (generator packages, the .NET SDK's own generators and generator projects in the solution), inside the AICB process, again as an IDE does. A deliberately malicious project could therefore run code at solution-open time. This is inherent to every MSBuild-based tool; the trust boundary is the same as "clone this repository and run `dotnet build`". **Only analyze solutions you trust.**
 
-One thing the product does *not* do while analyzing: it does not run your solution's third-party Roslyn analyzers. The `get_diagnostics` tool returns compiler diagnostics only; diagnostics that an analyzer or a source generator reports itself are not part of it. AICB also does not index generated code: generated documents are not walked, and source-generated members such as `[ObservableProperty]` properties are re-derived from the attributes in the parsed syntax.
+One thing the product does *not* do: run your solution's third-party Roslyn analyzers - with one opt-in exception for DiagnosticSuppressors, described below. The `get_diagnostics` tool returns compiler diagnostics only; diagnostics that an analyzer or a source generator reports itself are not part of it. To say where a real build would suppress some of them, it reads the analyzer assemblies' metadata only, which runs none of their code. The one exception is the opt-in argument `runSuppressors: true`: it loads exactly the analyzer assemblies that declare a DiagnosticSuppressor and runs those suppressors, as a real build does. Loading such an assembly also runs the constructors of every analyzer type it declares, inside the AICB process - the same trust boundary as the source generators above. AICB also does not index generated code: generated documents are not walked, and source-generated members such as `[ObservableProperty]` properties are re-derived from the attributes in the parsed syntax.
 
 ## 10.9 API keys
 
@@ -368,7 +369,7 @@ What one row contains:
 |---|---|
 | Timestamp | UTC time of the call, ISO 8601. |
 | Tool name | The tool that was called, or `(unknown)`. |
-| Session reference | A SHA-256 hash (the first 12 hex characters) of the session reference - never the `.sln` path. |
+| Session reference | A SHA-256 hash (the first 12 hex characters) of the session reference - never the `.sln` path. A solution path is normalized first, so the slash and backslash spellings of one path give one reference. |
 | Success / error | Whether the call succeeded, and for failures the exception **type** name. |
 | Result size | The summed length of the returned text blocks. |
 | Duration | The call duration in milliseconds. |
@@ -376,15 +377,19 @@ What one row contains:
 | Server version | The version of the server that recorded the row. |
 | Alias applied | Which parameter alias was rewritten, if the server accepted an alternative parameter name. |
 | Facet | The resolved task facet the call addressed, or the literal `(unresolved)` for an unknown spelling - never the caller's raw text. |
-| Error message | The failing exception's message, capped at 500 characters. This is the **only** free-text field. |
+| Error message | The failing exception's message, capped at 500 characters. This is the **only** free-text field. When a failed call also sent arguments the tool does not have, the message ends with `[unrecognized arguments: <names>]` (at most three names, then a count of the rest). |
 | Child calls | For `batch` / `measure`: a JSON tally of the sub-queries the call dispatched. |
 | Solution size | Project count and file count of the solution the call was answered against; empty when the call resolved no session. |
+| MCP profile | The id of the MCP profile the server was serving when it admitted the call; empty for `aicb call`. |
+| Auto-refresh mode | The mode the server runs (`off`, `reactive`, `proactive`), after `AICB_MCP_AUTO_REFRESH`; empty for `aicb call`. |
+| Unrecognized arguments | The names of arguments the call sent that the tool does not have (at most three), on success and failure; names only, never values. |
+| Client session | A random 12-hex id drawn once per server start, so one id is one MCP connection; it does not separate the subagents of one client session. Empty for `aicb call`. |
 
-**Never recorded:** source code, argument *values*, or raw session paths. The recording is deliberately limited to shapes.
+**Never recorded:** source code, argument *values*, or raw session paths. Argument names are recorded only where the tool does not have them. The recording is deliberately limited to shapes.
 
 Reading it:
 
-- The MCP tool `usage_report` returns the aggregate: total calls, error count and rate, distinct tools and sessions, first and last timestamp, the clients and server versions seen, and a per-tool breakdown with error classes, latency and result-size percentiles. Note that its counts are a **lower bound**: a sub-query inside `batch` or `measure` is recorded on the parent row only, and a one-shot `aicb call` invocation is not recorded at all.
+- The MCP tool `usage_report` returns the aggregate: total calls, error count and rate, distinct tools and sessions, client connections, first and last timestamp, the clients and server versions seen, and a per-tool breakdown with error classes, latency and result-size percentiles. Note that its counts are a **lower bound**: a sub-query inside `batch` or `measure` is recorded on the parent row only, and a one-shot `aicb call` writes the same row under the client name `aicb-call` only when it is given `--db-path` - without one it records nothing.
 - The `MCP Usage` panel shows the same data in the desktop application: `Refresh`, `Export`, `Import` and `Clear` at the top, and the regions `Tools`, `Calls`, `Notes`, `Errors`, `Clients & protocol` and `Snapshots`. In the `Calls` region you can attach a free-text note to an individual call; notes cascade with the call they belong to.
 
 Turning it off, in three steps:

@@ -162,7 +162,7 @@ The following table lists the sections in the order they appear in a full export
 | 27 | `ENUM` | One enum. | Part of the tree. |
 | - | `QUALITY_FINDINGS` | Code-quality findings, symbol by symbol. | The document is lean, or the finding list is empty. It has no profile slot and trails the document. |
 
-A section can also be absent because the document mode removed it (see "Document modes"). The quality findings section is deliberately not part of the ordered section list; it is appended after the tree in a full export, and sorted alphabetically in the ordinal ordering described below.
+A section can also be absent because the document mode removed it (see "Document modes"). The quality findings section is deliberately not part of the ordered section list; it is appended after the tree in a full export, and sorted alphabetically in the ordinal ordering described below. In a document that renders only part of the solution (a slice or a selection export), the findings are judged over the whole solution and listed for the types the document renders; a finding that names no type at all stays, while a single finding line that names no type - a dependency cycle, for example - is left out. The section then carries the comment `<!-- Judged over the whole solution; listed for the types this document renders. -->`.
 
 ### Section order
 
@@ -350,7 +350,7 @@ The header renders the type name in bold, followed by the layer and role as brac
 
 ### SEMANTICS and provenance markers
 
-`SEMANTICS` contains the resolved semantic values of a type or method: `Role`, `Layer`, `Domain`, `Context` and - for types - `Responsibility`. Layer values honor the active layer-mapping profile, so they agree with `LAYER_MAP` in the same document.
+`SEMANTICS` contains the resolved semantic values of a type or method: `Role`, `Layer`, `Domain`, `Context` and - for types - `Responsibility`. Layer values honor the active layer-mapping profile, so they agree with `LAYER_MAP` in the same document. A method's `Context` takes into account the side effects it reaches through the project methods it calls, so a method that writes a file only through a helper reads like one that writes it itself; its `Role` describes the method's own work. An interface method takes its `Context` from its implementations. A value an author set with an `<ai>` tag still wins.
 
 The last line of the block states where the values came from:
 
@@ -469,7 +469,7 @@ This list is a statement about the document, not about the whole solution. It na
 Two opt-in annotations can be added to the tags:
 
 - **Line numbers** (`lines="START-END"`): every `METHOD`, `CLASS`, `INTERFACE` and `ENUM` tag gets the 1-based line range of the declaration, in the same convention as the IDE status bar. When the feature is on but no line data is available - for example after reloading a stored analysis - the attribute reads `lines="n/a"` instead of being silently absent.
-- **Quality metrics**: method tags get `complexity="N"` (cyclomatic complexity) and `loc="N"` (lines of code); type tags get `ce="N"` (efferent coupling), `ca="N"` (afferent coupling) and `members="N"` (member count). When the afferent coupling of a type is not known in the current render view, the attribute reads `ca="n/a"` rather than `0`, so "not measured" cannot be mistaken for "nothing depends on this".
+- **Quality metrics**: method tags get `complexity="N"` (cyclomatic complexity) and `loc="N"` (lines of code); type tags get `ce="N"` (efferent coupling), `ca="N"` (afferent coupling) and `members="N"` (member count). In a partial export - a slice, a task pack or a selection - `ca` is counted over the whole solution the export was cut from, so it is the same number a full export prints, not the number of referencers the slice happened to keep, and the `QUALITY_HOTSPOTS` coupling line prints the same value. A type nothing references reads `ca="0"`.
 
 ## 5.11 Method compression modes
 
@@ -492,7 +492,7 @@ It contains the signature, the return type (or `void`), the accessibility (or `p
 
 The mode of a method is the result of several rules. A method is written compact only when its detail level is not `Full`, it does not belong to the primary or near flow, it is private, and it has no documentation summary, no AI annotations, no callers and no dependencies. Per-node overrides and the auto-compression heuristic can move any method into compact or detailed rendering.
 
-`METHOD_INFO` inside a full method block contains the objective method facts: `Name`, `Signature`, `Return`, `Access`, `Modifiers`, `ReturnKind`, `Parameters`, and the flags `IsStatic`, `IsAsync`, `IsExtension`, `ThrowsDetected`, `UsesLinq` and `UsesReflection` (each written only when true). A method block additionally carries `DEPENDENCIES` with a `Types:` list and a `Calls:` list of the methods it invokes in the solution, and a `USED_BY` list of its callers. The `Types:` list follows the rule of the type-level lists (see `DEPENDENCIES`): no keyword types, keyword arrays, nullable keywords or `dynamic`, while a solution's own type spelled like a keyword stays. A type used only as an element of a tuple inside a generic type (`new Box<(Order, int)>()`, `Action<(string, Change<int>)>`) is named there, and `find_usages` names the method as its user; a field typed as an array of tuples (`(Order, int)[]`) likewise counts the tuple's element types as used. The `Calls:` list includes the constructors the method calls: `new OrderService(repo)` appears as `OrderService.OrderService(IRepository)`. A constructor of an external type is not listed, and a non-public constructor is filtered like a non-public method.
+`METHOD_INFO` inside a full method block contains the objective method facts: `Name`, `Signature`, `Return`, `Access`, `Modifiers`, `ReturnKind`, `Parameters`, and the flags `IsStatic`, `IsAsync`, `IsExtension`, `ThrowsDetected`, `UsesLinq` and `UsesReflection` (each written only when true). `UsesReflection` is set by any `typeof` expression or a bare reflection member name; it is not the same reading as the `reflection` trait of `find_by_code_traits`, and the document's SPEC block says so. A method block additionally carries `DEPENDENCIES` with a `Types:` list and a `Calls:` list of the methods it invokes in the solution, and a `USED_BY` list of its callers. The `Types:` list follows the rule of the type-level lists (see `DEPENDENCIES`): no keyword types, keyword arrays, nullable keywords or `dynamic`, while a solution's own type spelled like a keyword stays. A type used only as an element of a tuple inside a generic type (`new Box<(Order, int)>()`, `Action<(string, Change<int>)>`) is named there, and `find_usages` names the method as its user; a field typed as an array of tuples (`(Order, int)[]`) likewise counts the tuple's element types as used. The `Calls:` list includes the constructors the method calls: `new OrderService(repo)` appears as `OrderService.OrderService(IRepository)`. A constructor of an external type is not listed, and a non-public constructor is filtered like a non-public method.
 
 ## 5.12 The legends
 
@@ -633,11 +633,20 @@ A run that bypassed the trimming prints one of these instead:
 <!-- token_budget: 60000 | bypassed (trimming disabled) -->
 ```
 
-Read the three fields carefully:
+When a token budget is enforced, the render first removes or reduces whole types to fit it, and both forms then end in a fourth part:
+
+```
+<!-- token_budget: 8000 | est_after_trim: 7900 | trimmed: 12 methods (0 dropped) | types: 180 dropped, 3 to structure -->
+```
+
+A bypassed line carries the same part, because types are cut whether or not method trimming runs.
+
+Read the fields carefully:
 
 - `token_budget` is the budget **you** asked for. It is not necessarily the number the trim aimed at internally, but it is always the user-facing budget.
 - `est_after_trim` is the estimated size after trimming. It may legitimately exceed the budget when overshoot was granted, and it is **not** the delivered size: it states what the document would cost if the render honored every compression level. Because only the `Drop` level reaches the output, the real document is usually larger.
 - `trimmed: N methods` counts the methods that ended below their starting level. The dropped methods are included in that number, so `dropped <= trimmed <= total`.
+- `types: N dropped, M to structure` counts the types the budget removed from the document and the selected types it reduced to structure (signatures, no bodies) and kept. A type that was first reduced and then removed counts as dropped only. The part is absent when no budget was enforced.
 
 The header is off by default, and only the `Aggressive Trimming` built-in profile enables it.
 
@@ -662,13 +671,14 @@ Four sections cannot be switched off through an MD profile because they have no 
 
 A few properties of the format are easy to misread. They are listed here so you can interpret a document correctly:
 
-- **Caller lists are partial by construction.** `USED_BY` names only the callers rendered in the same document. In a slice, a caller outside the slice is missing and the block may be absent altogether.
+- **Caller lists are partial by construction.** `USED_BY` names only the callers rendered in the same document - also after a token budget removed types from it. In a slice, a caller outside the slice is missing and the block may be absent altogether.
 - **Caller lists are static.** Reflection, dependency-injection containers, serializers and external assemblies are not visible to the analysis. A missing caller is not dead code.
 - **`inferred` values are guesses.** They are useful hints, but they are not facts. Rely on `fact` and `ai` values when correctness matters.
-- **`ca="n/a"` and `lines="n/a"` mean "not measured here"**, not "zero" and not "the feature is off".
+- **`lines="n/a"` means "not measured here"**, not "zero" and not "the feature is off". `ca` is always measured, over the whole solution, even in a slice.
 - **Empty fields and empty blocks are omitted.** A flag such as `IsStatic: true` appears only when the flag is set, so an absent flag means false. A missing optional field means it has no value in this render - not that it was empty in the source.
 - **`UnknownDependencies` names what could not be resolved**, not what does not exist. It typically contains dependencies from external assemblies.
 - **The namespace part of `QUALITY_HOTSPOTS` is omitted in partial exports**, and the document says why: measuring namespace coupling over a pruned view would understate the afferent and overstate the efferent coupling and could produce a misleadingly clean result.
+- **`QUALITY_FINDINGS` in a partial document lists only the findings about the types it renders.** They are judged over the whole solution, so a type is not reported as unused because its users were left out; findings about types the document does not render are not listed.
 
 ## 5.17 A complete example
 
