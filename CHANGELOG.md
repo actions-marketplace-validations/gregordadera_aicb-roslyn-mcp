@@ -4,6 +4,210 @@ Versions follow `Major.Minor.Series.Build`. The build number rises by one for ev
 change that lands, so gaps between published versions are normal - not every build is
 released.
 
+## 0.5.505.1 (unreleased) - find_usages lists production users on request, find_implementations names what each implementer closes a generic interface with, and get_diagnostics lists only the errors of a failing compile
+
+**Who is affected.** Everyone on the MCP server: reconnect your client once - 14 tools of the
+default profile have a new description (`calls_external`, `compare_with_previous`,
+`find_by_attribute`, `find_by_event_subscription`, `find_by_side_effects`, `find_implementations`,
+`find_tests_for`, `get_diagnostics`, `impact_of_change`, `list_insights`, `refresh_session`,
+`resolve_injection`, `usage_report`, `verify_claim`), and four tools gain an optional parameter
+(`find_usages`' `includeTests`, `find_implementations`' `typeArgumentBase`, `get_diagnostics`'
+`runSuppressors`, `list_insights`' `files`). No tool or parameter was removed or made required.
+**Scripts that read `get_diagnostics`' list:** the default `severityFloor` is now `auto`; when the
+compile has errors, `diagnostics` lists only the errors and `warningsNotListed` counts the warnings
+it left out. Pass `severityFloor: "warning"` for the previous answer; the counts are unchanged.
+**Scripts that compare `textualBindingKinds`:** two new kinds (`viaClosedGenericBase`,
+`viaInheritedMember`) are always present, at 0 where they do not apply, and users that moved into
+them leave `unclassified`. A snapshot or saved session from an earlier version is analyzed afresh
+the first time it is used, and a codebase remembered with an earlier version is recalled as
+`stale` until `refresh_remembered`. The configuration database is updated the first time this
+version opens it (four new columns of the local usage record, below); an older desktop app does
+not open a database a newer version has updated.
+
+### Usage and impact
+
+- **`find_usages` can list production users only:** with `includeTests: false`, users declared in
+  test projects leave the list before the 100-item cap, so a heavily tested symbol shows its
+  production fan-in, and `testUsersFiltered` counts the users left out. A user that cannot be
+  placed in a project stays listed. For the constructor form (`Type.Type`) test creation sites are
+  left out and the note counts them. An answer whose users were all in tests says so instead of
+  "nothing recorded". The default (`true`) answers as before.
+- **A same-named type of another arity or namespace is a user:** a type such as
+  `Identity<T1, T2> : Identity`, or `Ef.User : Core.User`, that derives from, holds or creates the
+  queried type is listed by `find_usages` and `impact_of_change`; before, it was dropped as a
+  reference to itself. A base type of the same name outside the solution is not counted.
+  `namesakes` now also names a generic and a non-generic type of one name (`Foo` and `Foo<T>`),
+  and a user whose name is the queried name itself carries its `fullName`.
+- **Two more kinds of textually invisible users** in `find_usages` and `impact_of_change`:
+  `viaClosedGenericBase` (a user that calls a member inherited from a generic base class another
+  type closes over the queried type, such as `OrderRepository : RepositoryBase<Order>`) and
+  `viaInheritedMember` (a user that derives from the queried type through another base class and
+  calls or overrides a member it inherits from it). `textualBindingNote` says what breaks them and
+  what does not.
+- **A WPF view takes the view-model production code assigns to it:** where neither a design-time
+  hint nor the `FooView`/`FooViewModel` naming ties a view to a view-model, the one type production
+  code assigns to its `DataContext` (`new MainWindow { DataContext = shell }`) makes the view's
+  bindings count as users of that view-model's members. Assignments in test projects do not
+  count, and a view assigned two different types takes none. `find_unresolved_bindings` is
+  unchanged.
+
+### Implementations of interfaces
+
+- **`find_implementations` names how each implementer gets a generic interface:** `closes` lists
+  the type arguments it closes the interface with, directly or through its bases (`Saved, IContent`),
+  and `through` names the base class or interface it gets it through when its own base list does
+  not name the interface.
+- **`typeArgumentBase` filters by a family of type arguments:** it keeps the implementers that
+  close the interface with an argument that is the named type or derives from or implements it
+  (`DeletedNotification<T>`), also through a base class. An implementer whose closing cannot be
+  read stays in the list, marked `closing: "unresolved"`. `typeArgumentBaseFilter` reports the
+  family size and what was left out, and a note says when the interface is not generic or no
+  solution type has that name.
+- **An interface that extends the queried one at any depth is listed** by `find_implementations`
+  (`via: "inherited"`), `explain_symbol` and `review_context`; before, a non-generic interface's
+  implementers stopped at the first level. `impact_of_change` lists such interfaces under `indirect`, for a generic contract as for a
+  non-generic one, so they no longer raise the risk; a class that gets the interface through a
+  derived interface stays a direct implementer.
+
+### `get_diagnostics`
+
+- **The default lists the errors first:** see "Who is affected". The answer of a large failing edit
+  shrinks to its errors (in one measured case from about 78,000 to about 19,000 characters, every
+  error listed).
+- **Analyzer suppressors are named, and run on request:** a new `suppressors` block names the
+  analyzer references of the solution's projects that declare a DiagnosticSuppressor (NUnit
+  analyzers, Entity Framework Core and the Razor compiler declare some) and how many diagnostics
+  their projects report, because a real build may report fewer. They are found by reading the
+  references' metadata, which runs none of their code. With `runSuppressors: true` exactly those
+  analyzer assemblies are loaded and their suppressors run, as a real build runs them; loading such
+  an assembly also runs the constructors of the analyzers it declares, inside the server.
+- **A restore since the session was loaded makes the answer `stale`** (unless it is already
+  `inconclusive`), and `verdictReason` names the project, because the diagnostics were compiled
+  against the references before the restore (errors such as CS0246 may not exist in a real
+  build).
+
+### Sessions and refresh
+
+- **A restore after the load is picked up by an ordinary refresh:** `refresh_session` reloads the
+  solution through MSBuild when a project's restore rewrote its assets file after the session was
+  loaded, and `reason` names the project; an automatic refresh that a source edit starts does the
+  same. A restore on its own does not start the automatic refresh. A plain build is still not
+  seen; `force: true` remains the deterministic reload.
+- **Adding, renaming or removing a C# file no longer reloads the solution** where the files around
+  it show which project compiles it: `mode` is `incremental` and `reason` says the change was
+  applied to the live solution. Where that is unclear, or for a markup or project file, the full
+  reload runs and `reason` says so. A full reload also reuses what it can, and its `reason` says
+  how many documents were reused.
+- **An answer that is a JSON array carries its staleness too:** `list_insights` (and any
+  session-bound answer that is an array) is followed by a separate `{"staleness": {...}}` block when
+  the session was stale or refreshed automatically; the array itself is unchanged.
+
+### Task packs and context documents
+
+- **A goal that names `Type.Member` seeds that member on that type:** `pack_for_task` and
+  `prepare_task` no longer seed every member of that name in the solution and bundle all their
+  tests. A member the type inherits seeds the base class or interface that declares it. A member
+  qualified by an interface also seeds the member its production implementations run. The goal's
+  own names rank first; when the cap of 24 seeds cut matching declarations, `prepare_task`'s
+  manifest says how many.
+- **Covering tests are listed strongest evidence first** in `prepare_task`, and a capped list says
+  how many of the tests found reach a seed only through an interface or abstract member.
+  `explain_symbol`'s test axis discloses its cap the same way.
+- **A document a token budget pruned lists only the callers it renders** in `USED_BY` and the
+  method caller lists; before, a three-type document could list hundreds of callers it did not
+  contain. The budget now goes to code, so the same budget can keep more types.
+- **`QUALITY_FINDINGS` in a partial document are judged over the whole solution** and listed for
+  the types the document renders, so a type is no longer reported as unused because its users were
+  cut out; the section says so in a comment line.
+- **`ca` in a partial document is the number a full export prints:** the afferent coupling on a
+  type tag and on the `QUALITY_HOTSPOTS` line is counted over the whole solution the document was
+  cut from, and `ca="n/a"` no longer appears; a type nothing references reads `ca="0"`.
+- **The budget header counts the types a budget removed:** when a token budget is enforced, both
+  header forms end in `| types: N dropped, M to structure`, the bypassed form included.
+- **A method's context sentence counts what it reaches through the methods it calls:** a method
+  that writes a file only through a helper reads like one that writes it itself (`SEMANTICS`,
+  `explain_symbol`, `get_context`). Its role stays its own work, an interface method takes its
+  implementations' new sentence, and an `<ai>` value an author wrote still wins.
+- **A context template can set how far a `prepare_task` bundle grows** around the symbols a task
+  names (`Expansion around the MCP start point`, desktop app, below); the manifest names the
+  setting when it is used. Empty, the default, changes nothing.
+- The YAML and JSON notations of `export_markdown` no longer swallow the rest of the document after
+  an included file whose code fence carries an info string such as "c#".
+
+### Insights and checks
+
+- **`list_insights` takes the files of a change:** with `files`, the answer lists the findings
+  about the types those files declare, with their detail lines (up to 20 per finding), and names
+  each path the solution does not hold in `notInSolution`. Without `files` the answer is the array
+  it always was. The `aicb-code-review` and `aicb-code-simplifier` skills call it this way.
+- **Without a configuration database the insight tools say whose thresholds judged:**
+  `list_insights`, `get_insight` and `solution_metrics` carry a `configDbNote` naming the built-in
+  quality profile. With `aicb call`, the note of an array answer goes to stderr, so stdout stays
+  one JSON document.
+- **`find_tests_for` says when no row is strong evidence:** a list of only name guesses and
+  contract rows carries a note that it does not show that anything pins the symbol.
+- **A comparison of a state with itself is not evidence:** `verify_claim` answers `indeterminate`
+  when baseline and changed are the same state, and `compare_with_previous` adds a note when the
+  snapshot was saved from the source state the session still holds: with an empty diff it says the
+  comparison is with itself, and from another analyzer build that a difference can come from the
+  analyzer.
+- **A partial type is one row** in `find_by_event_subscription`, the type axis of
+  `find_by_attribute`, `find_dead_code` (judged as a whole, so the half of a partial `Program`
+  without `Main` is no longer dead) and `find_god_objects`; in the first two, rows that would read
+  alike add `fullName` or `project`.
+- `find_by_side_effects(purity: "pure")` explains in `methodsScannedNote` why its `methodsScanned`
+  is smaller than that of the other listings, and `find_by_code_traits(trait: "reflection")`
+  explains in `traitReading` how it differs from the exported `UsesReflection` flag.
+
+### Dependency injection
+
+- **Umbraco collection builders are listed in `resolve_injection`:** when the query names a
+  builder's collection, item type, builder or a collected type, a `collectionBuilders` block lists
+  each builder's operations (`append`, `insertBefore`, `remove`, `replace`, `clear` and the others)
+  in writing order. They are not registrations: what the collection holds at runtime depends on the
+  order the composers run in, and the block says so.
+
+### Usage record and `server_info`
+
+- **`usage_report` names the window its never-called list covers**, and adds `clientSessions` (how
+  many client connections the calls came from) and, per tool, `ignoredArgumentCalls` (calls that
+  answered although they sent an argument the tool does not have).
+- **Each call recorded through the server keeps** the MCP profile and the automatic-refresh mode it
+  ran under, the names of arguments the tool does not have (never values) and a random id per
+  server start; one recorded through `aicb call` keeps only the argument names. A failed call's
+  recorded error message names such arguments. One solution path spelled two ways counts as
+  one session.
+- **`server_info` says `drift UNKNOWN`** when git did not answer in time, instead of staying silent
+  as for a foreign repository.
+
+### `aicb init` and the symbol guard
+
+- **A `CLAUDE.md` in the project directory is evidence of Claude Code:** `aicb init` with
+  `--hooks auto` now installs the Claude Code guard in a project whose `.claude/` folder holds only
+  its own skills.
+- **The guard lets a refused Grep through in two cases**, with a note: once the session has asked
+  an aicb tool about that name (Claude Code), and where aicb is not available in the session or
+  its configuration (every harness). A `glob` whose every pattern ends in a literal non-C#
+  extension (`*.mjs`, for example) counts as a text search; a negated glob does not.
+
+### Desktop app
+
+- **The filters above the solution tree sit in three fixed rows**, so a narrow sidebar stays
+  tidy.
+- **The Insights page header names the quality profile** the last analysis ran under
+  (`Profile: <Name>`); a template's profile wins over the one chosen in Settings.
+- **Templates:** a new `Expansion around the MCP start point` field under `Profile overrides`
+  sets how far a `prepare_task` bundle grows when the server or the CLI renders through the
+  template; the expansion slots of the selection engine drive the GUI tree only, and their tooltips
+  say so. A running server reads a template change after a restart.
+
+### Other changes
+
+- Several programs that open one database at the same moment (the desktop app and servers of
+  parallel sessions) update it once; before, the second could fail with a migration error.
+- The README's GitHub Action example pins this release (`@v0.5.505.1` with `version: 0.5.505.1`).
+- The three PDF manuals and the manual chapters describe this release.
+
 ## 0.5.504.1 (2026-10-21) - Razor views and Avalonia markup count as usage, every implementer of a generic interface is found, and Program.cs counts in full
 
 **Who is affected.** Everyone on the MCP server: reconnect your client once - 8 tools of the
