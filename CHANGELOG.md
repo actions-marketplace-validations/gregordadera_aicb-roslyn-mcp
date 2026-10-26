@@ -4,7 +4,7 @@ Versions follow `Major.Minor.Series.Build`. The build number rises by one for ev
 change that lands, so gaps between published versions are normal - not every build is
 released.
 
-## 0.5.505.1 (unreleased) - find_usages lists production users on request, find_implementations names what each implementer closes a generic interface with, and get_diagnostics lists only the errors of a failing compile
+## 0.5.505.1 (2026-10-26) - find_usages lists production users on request, find_implementations names what each implementer closes a generic interface with, and get_diagnostics lists only the errors of a failing compile
 
 **Who is affected.** Everyone on the MCP server: reconnect your client once - 14 tools of the
 default profile have a new description (`calls_external`, `compare_with_previous`,
