@@ -99,14 +99,16 @@ in [How AICB differs from a language server](manual/general/01-introduction.md#1
 ## How incremental refresh works
 
 A session records a hash of the analyzed file set. When saved source changes are
-detected, the incremental path replays changed document texts into the warm Roslyn
-solution and reuses facts for documents the change could not have reached. The
-response identifies this as `mode: "incremental"`.
+detected, the incremental path brings the warm Roslyn solution up to date - edited
+files, and C# files added, renamed or removed where it is clear which project
+compiles them - and reuses facts for documents the change could not have reached.
+The response identifies this as `mode: "incremental"`.
 
 An unavailable incremental path or `refresh_session(force: true)` causes a full
 workspace reload. A build or restore can change resolved references without
-changing source files; after either, use `force: true` when an earlier answer
-reported unresolved projects.
+changing source files. A restore that rewrote a project's assets file after the
+session was loaded is picked up by an ordinary refresh; after a build, use
+`force: true` when an earlier answer reported unresolved projects.
 
 A session has at most one refresh in flight. A concurrent caller joins that refresh
 instead of starting a second analysis of the same session. The complete operational

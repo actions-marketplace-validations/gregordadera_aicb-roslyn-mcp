@@ -125,9 +125,11 @@ The Codex entry carries `tool_timeout_sec = 300`: Codex gives up on a tool call 
 60 seconds by default, and the first call on a large solution analyzes it.
 
 **Know this before it happens:** if your project has a folder for an agent harness
-aicb knows (`.claude/`, `.codex/`, `.opencode/`), `aicb init` also installs the
-**symbol guard** there. The guard *refuses* a C# symbol search by grep or file read and
-points the agent at the aicb tool that answers it properly. That is what makes the
+aicb knows (`.claude/`, `.codex/`, `.opencode/`), or a `CLAUDE.md` for Claude Code,
+`aicb init` also installs the **symbol guard** there. The guard *refuses* a C# symbol
+search by grep or file read and points the agent at the aicb tool that answers it
+properly; once the agent has asked aicb about that name (Claude Code), or where aicb
+is not available, such a grep goes through with a note. That is what makes the
 tools actually get used - and it is the one part of the install that changes what
 your agent may do. To skip it: `aicb init --hooks none` (the server is still registered). To remove an installed guard,
 delete the aicb entry from `.claude/settings.json`, `.codex/hooks.json` or
