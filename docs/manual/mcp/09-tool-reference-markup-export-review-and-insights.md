@@ -185,9 +185,9 @@ Four tools with overlapping purpose. The order below is the decision aid: read o
 | Parameter | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `sessionId` | string | yes | - | The session id returned by `analyze_solution`. |
-| `goal` | string | yes | - | The task description. Name the relevant types and methods in it, e.g. `refactor OrderService.Cancel and Validate`. |
+| `goal` | string | yes | - | The task description. Name the relevant types and methods in it, e.g. `refactor OrderService.Cancel and Validate`. A member written as `Type.Member` seeds that type's member only (a member the type inherits: the nearest base class or interface that declares it); a member qualified by something that is not a type (a variable, a namespace) is read as if it were written bare. |
 | `budget` | integer | no | `null` | Token budget (floor 8000). Exact type names and exact method names with one owner are pinned; broad subword or ambiguous same-name families may be capped by closeness and in-slice fan-in. A leading comment discloses how many types were dropped. Omitted, the bundle renders against a ceiling: the active MCP profile's token budget, else about 10000 tokens. |
-| `includeQualityMetrics` | boolean | no | `false` | When true, also emit the `<QUALITY_HOTSPOTS>` section plus `complexity=""` and `ce=""` attributes for the packed symbols. |
+| `includeQualityMetrics` | boolean | no | `false` | When true, also emit the `<QUALITY_HOTSPOTS>` section plus `complexity=""` and `ce=""` attributes for the packed symbols. A type's afferent coupling (`ca=""`) counts the referencers in the whole solution, not only those in the bundle. |
 | `lean` | boolean | no | `true` | Drop the repeated format-rules preamble and omit enabled-but-empty graph sections; keeps the legends and all non-empty sections. Set `false` for the full AI-Builder-Markdown document. |
 | `facet` | string | no | `null` | The task axis of this call: `General` (default), `Exploration`, `Refactoring`, `Debugging`, `Review`, `Testing`, `Documentation`, `Architecture`, `Performance`. The former name `slot` is still accepted. |
 
@@ -198,6 +198,8 @@ Note: `pack_for_task` always renders the lean bundle - its render deliberately s
 Note: on a multi-targeted solution, the bundle is deduplicated to one logical project per name, using the newest target framework's instance - the same view `find_symbol` uses.
 
 Note: when several types share a name the goal names, every one of them renders. A same-named type that the ranking left out is not added.
+
+Note: a member qualified by an interface (`IOrderService.Cancel`) also seeds that member on every production type that implements the interface - where an implementation inherits the member, on the base class that declares it. A class qualifier does not hand its interfaces on to other implementations. The goal's own names rank first; the seeds are capped at 24 declarations.
 
 Note: the bundle renders as `get_context` does: a type the budget reduces to structure lists the signatures of the methods it does not render as method blocks; a goal naming an interface pulls its implementing types, for a generic interface also those that close it through a base class or another interface; and a partial type renders one block per project it is compiled into.
 
@@ -224,7 +226,11 @@ Availability: in the default tool set; usable as a sub-query of `batch`.
 <!-- prepare_task | goal: "..." | seeds: ... | tests: ... | siblings: ... | render: template -->
 ```
 
-Each bundled test carries its evidence tier: `(invokes)` means the test calls the symbol, `(invokes-via)` means it reaches the symbol through one method or constructor it calls, and `(name)` is a name guess. When nothing in the list invokes the symbol at either hop, the manifest says so. At most 40 covering tests are bundled per bundle; a cap is disclosed as `(+N more, capped)`. An axis that found nothing reads `(none)`. The `render` segment reads `template` on a server with a config DB, the default, and `lean` without one.
+`seeds` names the seeded symbols; a member bound to one type reads `Type.Member`. When the seed cap cut matching declarations, the segment ends in `(+N more matching declarations, capped at 24 - name one in the goal to seed it)`. The goal-naming rules of `pack_for_task` apply here too, including the seeds an interface-qualified member hands on to its implementations, and the covering tests follow the seed: a `Type.Member` seed bundles the tests of that type's member only.
+
+Each bundled test carries its evidence tier, the `matchReason` that `find_tests_for` prints (`invokes`, `invokes-via`, `accesses`, `accesses-via`, `constructs`, `constructs-via`, `dispatch`, `dispatch-via` or `name`; see its tier table), and the list is ordered strongest tier first, then by name. When no row in the list is strong evidence, the manifest says so (`none invokes or constructs the symbol`). At most 40 covering tests are bundled per bundle; a cap is disclosed as `(+N more, capped)`, and when some of the tests found reach a seed only through an interface or abstract member it implements, the note adds how many of all found do: `(+N more, capped; X of Y reach a seed only through an interface or abstract member it implements)`. An axis that found nothing reads `(none)`. The `render` segment reads `template` on a server with a config DB, the default, and `lean` without one.
+
+When the template the render runs through sets `Expansion around the MCP start point`, the manifest adds `| seed expansion: <Name> (<id>)`; a strategy id that does not resolve adds `| seed expansion: '<id>' not found, the default ran`, and one that cannot be read `| seed expansion: '<id>' could not be read, the default ran`. Without the setting, both render paths grow the neighborhood around the seeds the same way. A running server reads a template change only after a restart.
 
 Note: on a multi-targeted solution, the bundle is deduplicated to one logical project per name, using the newest target framework's instance.
 
@@ -385,7 +391,7 @@ Availability: in the default tool set; not usable as a sub-query of `batch` (hea
 
 Note - the scope of `no_new_api`: it is about additions and signature changes, so a removal does not refute it; a change set that only deletes public API is legitimately `confirmed`. Removals are therefore never silent: the reason states the boundary, and every removal the same diff records is listed as evidence, prefixed with `-`. For the removal question, ask `symbol_removed_unused`.
 
-Note: the tool is conservative in both directions - what the diff cannot prove is never falsely confirmed and never falsely refuted. `indeterminate` is returned, with the cause named, for a name that resolves to nothing; for a property, field, event or enum member (the diff models types and methods only); and for the simple name of a removed type that the diff had to render by its full name because it is ambiguous - pass that full name instead. An unsupported claim type also returns `indeterminate`.
+Note: the tool is conservative in both directions - what the diff cannot prove is never falsely confirmed and never falsely refuted. `indeterminate` is returned, with the cause named, for a name that resolves to nothing; for a property, field, event or enum member (the diff models types and methods only); and for the simple name of a removed type that the diff had to render by its full name because it is ambiguous - pass that full name instead. A removed method whose only baseline callers called an interface or abstract member it implemented (`find_usages`' `viaContract`) is `indeterminate` too, and the reason says whether that credit was exact. Baseline and changed must be two states: the same session twice (also an id and the solution path it was analyzed from), or two sessions of one solution with an equal file-set hash and an empty diff, answer `indeterminate`, and the reason says so and how to get two states (for example the old commit analyzed in a second worktree). An unsupported claim type also returns `indeterminate`.
 
 For `symbol` with `symbol_removed_unused`: a namespace-qualified type name is accepted even when nothing was removed - this tool resolves it against the baseline's declared type identities, which the fan-in tools do not, and the answer then names the simple name to carry on with. A dotted name that no namespace declares stays unresolved rather than falling back to whatever type carries its last segment.
 
@@ -448,14 +454,15 @@ Availability: not in the default tool set. Expose it by enabling the `api-surfac
 
 ### `list_insights`
 
-**Purpose.** List the code-quality, async and design-smell insights for a session - long methods, fat interfaces, unused types, missing async suffixes, many-parameter methods, and more. Each insight is aggregated per producer with a details list.
+**Purpose.** List the code-quality, async and design-smell insights for a session - long methods, fat interfaces, unused types, missing async suffixes, many-parameter methods, and more. Each insight is aggregated per producer, with the count of its detail lines; `get_insight` lists the lines, and `list_insights` lists them too when it is scoped to files.
 
-**When to use it.** As the entry point of a quality review: it tells you which kinds of findings exist for this solution and how many of each.
+**When to use it.** As the entry point of a quality review: it tells you which kinds of findings exist for this solution and how many of each. With `files` set to the files a change touches, it is the review sweep: the findings about the types those files declare, with their lines.
 
 | Parameter | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `sessionId` | string | yes | - | The session id returned by `analyze_solution`. |
 | `dbPath` | string | no | `null` | The active QualityProfile (producer thresholds and toggles) and the configured default layer profile of that database. An explicit layer profile passed to `analyze_solution` wins over the database-configured one. Omitted: the server's default configuration database, else the default profile. |
+| `files` | string array | no | `null` | C# files, each absolute or relative to the solution folder. The answer keeps the findings about the types these files declare and becomes an object (see "With `files`" below). Omitted or empty: the solution-wide array. |
 
 **Response.** An array of summaries, one per producer that found something:
 
@@ -471,6 +478,8 @@ Availability: not in the default tool set. Expose it by enabling the `api-surfac
 | `suggestion` | A short, concrete fix sentence, when the producer has one. |
 | `suppressed` | How many detail lines were removed by triage; `null` when nothing was filtered. |
 
+**With `files`.** The answer is an object `{files, notInSolution, insights}`. `files` lists the given files the solution holds, solution-relative; `notInSolution` the ones it does not (a deleted or non-C# file, a typo), as given - a path is never silently dropped. Each insight carries the fields above plus `details` and `detailLocators` (`{typeName, memberName}` per line): the lines about the types the files declare, up to 20, then a `(... and N more)` line; `detailsCount` counts the in-scope lines. `title`, `remediationCostMinutes` and `suppressed` stay whole-solution numbers, so `detailsCount` plus `suppressed` is not a split there. A line matches by the simple type name of its locator, so a same-named type elsewhere matches too; a line with no type locator is left out, and an insight about the solution as a whole (no lines) stays with `detailsCount` 0. A relative path is read against the solution folder, so pass absolute paths when your list comes from `git diff --name-only`, which prints paths relative to the repository root.
+
 Note: this answer is triage-filtered on both axes. Findings the solution marked as intentional (a suppression, in the database or in the git-tracked `<Solution>.aicb.json` sidecar) and findings a user dismissed as seen (in the solution record, not the sidecar) are removed, and an insight whose findings are all gone does not appear at all.
 
 Note: `suppressed` counts what both axes removed together, so it is not a count of sidecar entries. And `title` is producer text computed before filtering, so on a partially filtered insight it still names the pre-filter total - `detailsCount` plus `suppressed` are the real split.
@@ -478,6 +487,8 @@ Note: `suppressed` counts what both axes removed together, so it is not a count 
 Note: insights that depend on facts computed live during analysis (for example the unresolved-binding findings) are absent on a session recalled from a saved snapshot.
 
 Note: the unused-type finding applies the type exemptions of `find_dead_code`, so a MEF part is not reported. The side-effect-concentration and security-sensitive-call findings judge methods only; the top-level-statement units that `calls_external` and `find_by_side_effects` list are not part of them.
+
+Note: on a server without a config DB, and with no `dbPath`, the built-in default quality profile sets the thresholds and toggles. The answer then carries a `configDbNote` that says so, as a text block of its own after the array (with `files`, a member of the object); a staleness disclosure travels the same way after an array. With `aicb call`, a note that would follow the array goes to stderr, so stdout stays one JSON document.
 
 Availability: in the default tool set; usable as a sub-query of `batch`.
 
@@ -499,6 +510,8 @@ Note: ids are case-sensitive. An unknown or misspelled id is rejected together w
 **Response.** The full insight: `id`, `featureId`, `title`, `description`, `actionLabel`, `severity`, `persistent`, `allowsPromptInput`, `secondaryActionLabel`, `details`, `remediationCostMinutes`, `suggestion`, `detailLocators` and `suppressedDetailCount`.
 
 Note: triage-filtered like `list_insights`, on both axes. `suppressedDetailCount` reports the two axes added together, so it is not a count of sidecar entries. A producer silenced outright reports as "registered but 0 hits".
+
+Note: without a config DB in force (no `dbPath`, and no default config DB on the server), a `configDbNote` member says that the built-in default quality profile judged.
 
 Availability: in the default tool set; usable as a sub-query of `batch`.
 

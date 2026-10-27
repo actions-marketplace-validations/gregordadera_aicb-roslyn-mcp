@@ -480,6 +480,8 @@ The editor is organized into four sections:
 
 The four slots are independent: you decide per tier which detail preset and which expansion strategy apply.
 
+The Expansion Strategy column drives the GUI tree only. The MCP server and the CLI do not read it; for a `prepare_task` bundle they use `Expansion around the MCP start point` under `Profile overrides`. The slot tooltips say so.
+
 **`Export content`**
 
 | Option | Meaning |
@@ -492,13 +494,14 @@ The four slots are independent: you decide per tier which detail preset and whic
 
 Note: XAML, `.csproj` and other supporting files are included automatically by relevance; only the secret-bearing configuration subset stays gated by the option above.
 
-**`Profile overrides`** - optional per-template overrides. An empty slot means "use the globally active profile". The three profile fields (`CompressionRules profile`, `Pipeline profile`, `Insights profile`) each have a cross button that empties the slot. `Token budget (MCP render)` has no cross; clear its text field to remove that override.
+**`Profile overrides`** - optional per-template overrides. An empty slot means "use the globally active profile" - for `Expansion around the MCP start point`, the MCP's own default. The three profile fields (`CompressionRules profile`, `Pipeline profile`, `Insights profile`) and `Expansion around the MCP start point` each have a cross button that empties the slot. `Token budget (MCP render)` has no cross; clear its text field to remove that override.
 
 | Field | Meaning |
 |---|---|
 | `CompressionRules profile` | Controls scoring and Auto-Compression. Empty = use the globally active profile. |
 | `Pipeline profile` | Controls the token-budget pipeline and snapshot auto-reload. Empty = use the globally active profile. |
 | `Token budget (MCP render)` | Optional maximum output tokens when the MCP server renders through this template (floored at 8000). Positive whole numbers only; empty = inherit the global pipeline-profile budget. When set it forces trimming; a set MCP-profile budget wins over it. Affects the MCP render path only - GUI and CLI exports are unaffected. |
+| `Expansion around the MCP start point` | How far the bundle grows around the symbols a task names when the MCP server or the CLI renders through this template (`prepare_task`). Empty = the MCP's own default. The GUI tree does not read it - it uses the Expansion Strategy slots of the selection engine, and those do not reach the MCP or the CLI. A whole-solution export is not affected. The CLI reads a change on its next run; an MCP server that is already running reads it only after a restart. Help line: `For the MCP and CLI only, not the GUI tree. Empty = the MCP default.` |
 | `Insights profile` | Controls producer toggles, thresholds and ActionMode. Empty = use the globally active profile. |
 
 **Required selections and save validation.** `Prompt`, `MD Profile`, all four detail presets, all four expansion strategies and the name are required. Saving fails with a specific message, for example `Save failed: Prompt is required.`, `Save failed: Compact Detail Preset is required.`, `Save failed: Compact Expansion Strategy is required.` or `Save failed: Name is required.` The name must be unique among templates of the same kind (built-in vs custom), compared case-insensitively: `Save failed: A template with name '{name}' already exists.`

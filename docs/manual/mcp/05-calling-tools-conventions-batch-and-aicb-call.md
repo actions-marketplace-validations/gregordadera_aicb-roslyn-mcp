@@ -26,7 +26,7 @@ How many tools each path reaches, depending on how the server was started:
 
 Two properties of this table are easy to misread:
 
-- **Path 3 records no usage data.** Tool-call telemetry hangs on the `tools/call` pipeline, which `aicb call` does not use.
+- **Path 3 records usage data only with `--db-path`.** `aicb call` does not use the `tools/call` pipeline; given `--db-path`, it writes the same row under the client name `aicb-call`, and without one it records nothing.
 - **Path 2 records the parent call and a sub-query tally, but no row per sub-query.** The tally is described under "Counting sub-queries" below.
 
 The refusal on path 1 reads:
@@ -175,7 +175,7 @@ aicb call batch --sln C:/repo/App.sln --arg queries='[{"tool":"find_usages","arg
 
 **How a value is converted.** `string`, `bool`, `int`, `long`, `double`, `enum` (case-insensitive) and `string[]` (a JSON array or a comma-separated list) are read directly. Any other type is deserialized from JSON with the same options as `tools/call`, which is how a complex argument such as `batch`'s `queries` can be passed as `--arg queries='[...]'`. Numbers are read with the invariant culture: write `0.6`, not `0,6`. A decimal comma is rejected with a hint naming the cause, because on a German, French or Spanish desktop `0,6` looks perfectly well formed.
 
-**Output and exit codes.** A string result is printed unchanged; anything else is serialized as JSON. The result goes to **stdout**, so it can be piped or inspected. Diagnostics and warnings go to **stderr** - including the progress of `analyze_solution`, which has no client to notify here and therefore reports on stderr. Exit codes: `0` success, `1` user error (unknown tool, missing or invalid argument, the tool's own actionable error), `2` unexpected failure, `3` cancelled.
+**Output and exit codes.** A string result is printed unchanged; anything else is serialized as JSON. The result goes to **stdout**, so it can be piped or inspected. Diagnostics and warnings go to **stderr** - including the progress of `analyze_solution`, which has no client to notify here and therefore reports on stderr. Where a note would follow a JSON array - for example the built-in-profile note of `list_insights` without `--db-path` - it is written to stderr as well, so stdout stays one JSON document. Exit codes: `0` success, `1` user error (unknown tool, missing or invalid argument, the tool's own actionable error), `2` unexpected failure, `3` cancelled.
 
 An unknown tool answers `unknown tool 'X'. Available tools: ...` and lists the whole assembly - which is correct here, because this verb has no curation.
 
@@ -253,8 +253,9 @@ The default is `false` almost everywhere - the tools report production code firs
 | `testTypesFiltered` | `find_dead_code` |
 | `testImplementationsFiltered` | `find_implementations` |
 | `testRegistrationsFiltered` | `resolve_injection` |
+| `testUsersFiltered` | `find_usages` (only on `includeTests: false`) |
 
-`detect_circular_dependencies` is the exception: it excludes test projects when `includeTests` is false but has no filtered-count field, so namespaces or cycles removed with the test graph are undisclosed. Another exception with a different meaning is `prepare_task(includeTests)`, whose default is `true` and which controls whether the **covering tests are bundled into the answer** - not which code is searched.
+`detect_circular_dependencies` is the exception: it excludes test projects when `includeTests` is false but has no filtered-count field, so namespaces or cycles removed with the test graph are undisclosed. Another exception with a different meaning is `prepare_task(includeTests)`, whose default is `true` and which controls whether the **covering tests are bundled into the answer** - not which code is searched. `find_usages(includeTests)` defaults to `true` as well; `false` leaves the users declared in test projects out before its 100-item cap and counts them in `testUsersFiltered`.
 
 ### The capped envelope
 

@@ -35,7 +35,7 @@ If the diff touches a C# solution and the aicb MCP server is connected (tool nam
 - One-call helpers and single-implementation interfaces: `find_usages` / `find_implementations` on the symbol.
 - Dead branches: `find_dead_code` (deliberately narrow: private methods with zero callers, test projects excluded - an empty result is not proof of absence, verify elsewhere).
 - YAGNI: `impact_of_change` on the extension point. `risk: none` plus only-test consumers is evidence, not proof - DI registration, reflection, XAML and source generators escape the static graph.
-- Size/complexity claims: `symbol_metrics` and `list_insights`.
+- Size/complexity claims: `symbol_metrics`, and `list_insights` with `files` set to the changed C# files as absolute paths.
 
 If aicb is not connected, say so and work from reading alone. Never skip these checks silently.
 

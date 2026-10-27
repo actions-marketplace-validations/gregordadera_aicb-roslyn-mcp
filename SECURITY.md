@@ -37,12 +37,19 @@ analyzing a solution actually execute?**
   configuration on request, and `export_markdown` writes the file you point
   `outputPath` at. **The desktop app is the deliberate exception:** its Details tab
   is an editor, and a file you change there is written back when you press Save.
-- **It does not run your solution's third-party Roslyn analyzers.**
-  `get_diagnostics` returns **compiler** diagnostics only: it calls
-  `Compilation.GetDiagnostics()`, which by Roslyn's design does not invoke
-  `DiagnosticAnalyzer`s, and `aicb` never calls `CompilationWithAnalyzers` /
-  `WithAnalyzers`. Diagnostics that a source generator reports itself are not
-  included either.
+- **It does not run your solution's third-party Roslyn analyzers unless you ask
+  for one kind of them.** `get_diagnostics` returns **compiler** diagnostics only:
+  it calls `Compilation.GetDiagnostics()`, which by Roslyn's design does not invoke
+  `DiagnosticAnalyzer`s. Diagnostics that a source generator reports itself are not
+  included either. To tell where a real build would suppress some of those
+  diagnostics, it reads the analyzer assemblies' **metadata** only, which runs none
+  of their code. The one exception is the opt-in argument `runSuppressors: true`:
+  it loads exactly the analyzer assemblies that declare a `DiagnosticSuppressor`
+  and runs those suppressors through `CompilationWithAnalyzers`, as a real build
+  does. Loading such an assembly creates every analyzer type it declares, so their
+  constructors run too. That code then runs inside the `aicb` process, in the same
+  trust boundary as the source generators below. Nothing else calls
+  `CompilationWithAnalyzers` / `WithAnalyzers`.
 
 ### What `aicb` *does* run: your solution's source generators
 

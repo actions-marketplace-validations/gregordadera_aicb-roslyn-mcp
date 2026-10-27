@@ -60,13 +60,13 @@ The eight effect tokens:
 | `messaging` | Message-bus and queue clients, for example MassTransit, RabbitMQ, Azure Service Bus/Event Grid/Queues, Kafka, NATS, MediatR and Amazon SQS/SNS. |
 | `unknown` | An external call that no classification rule matched - an unanalyzable third-party member, reported so the gap is visible instead of reading as pure. |
 
-**Response.** `scope`, `note`, `effect`, `purity`, `methodsScanned`, `matches`, `availableEffects` and `testMatchesFiltered`. Each hit carries the method's `name`, `declaringType`, `namespace` and its `effects` list.
+**Response.** `scope`, `note`, `effect`, `purity`, `methodsScanned`, `methodsScannedNote` (on `purity="pure"` only), `matches`, `availableEffects` and `testMatchesFiltered`. Each hit carries the method's `name`, `declaringType`, `namespace` and its `effects` list.
 
 **Notes.**
 
 - Effects are propagated transitively, along calls and creations: a method that calls a project method which hits the database counts as `database`, and so does a method that builds an object whose constructor hits the database. A constructor that chains to such a constructor with `: this(...)` or `: base(...)` carries the effect too. A hit does not say which of its effects are direct and which inherited.
 - With neither `effect` nor `purity`, only impure methods are listed - a bare "all methods" dump has no value.
-- The scan set is every method plus every property, indexer and event accessor and every constructor with a body, each as a unit of its own under its metadata name (`get_X`, `set_X`, `.ctor`, `.cctor`). A field or property initializer counts toward the constructor the compiler runs it in. The `purity="pure"` list stays methods-only, because a bodied getter is pure by default and would drown it.
+- The scan set is every method plus every property, indexer and event accessor and every constructor with a body, each as a unit of its own under its metadata name (`get_X`, `set_X`, `.ctor`, `.cctor`). A field or property initializer counts toward the constructor the compiler runs it in. The `purity="pure"` list stays methods-only, because a bodied getter is pure by default and would drown it. A pure answer says so in `methodsScannedNote`: its `methodsScanned` is smaller than that of the impure and unfiltered listings by design, so compare listings by their hits, not by this count.
 - **Top-level statements.** On an unscoped query each file of top-level statements is one unit, listed as `<path>/Program.cs (top-level)` with no declaring type and no namespace, beside the methods; `methodsScanned` counts it once. Its effects include what the project methods and constructors it calls reach, and a local function among the statements is part of it. A namespace-scoped query and the `purity="pure"` list stay methods-only; a test project's file is filtered like a test method, and a multi-targeted project's file counts once. On a capped page the top-level rows sort first; `totalFound` and `truncated` say what was cut. On a session recalled from a snapshot stored before these units were recorded, the answer carries `TOP-LEVEL EFFECTS NOT KNOWN`.
 - On zero matches, `availableEffects` lists the tokens this scope actually records. An empty `availableEffects` means nothing was recorded in a scope that was scanned; the field is omitted when `methodsScanned` is `0`, and the note then says that nothing was scanned at all.
 - `effect` together with `purity="pure"` is rejected: a pure method carries no effect, so the answer would be empty by construction.
@@ -82,7 +82,7 @@ Finds the production methods that call an external (non-solution: BCL or third-p
 | Parameter | Type | Required | Default | Meaning |
 |---|---|---|---|---|
 | `sessionId` | string | yes | - | The session id or a solution path. |
-| `pattern` | string | yes | - | A case-insensitive substring of the external call key, for example `Process.Start`, `File.`, `Assembly.Load`, `System.Reflection` or `JsonSerializer`. `apiName` is accepted as an alias. A very broad pattern such as `System` is truncated at 200. |
+| `pattern` | string | yes | - | A case-insensitive substring of the external call key, for example `Process.Start`, `File.`, `Assembly.Load`, `System.Reflection` or `JsonSerializer`. `apiName` is accepted as an alias. A very broad pattern such as `System` is truncated at 200. It is the only search argument; there is no `symbol` parameter. |
 | `scope` | string | no | `solution` | `solution` or a namespace prefix. |
 | `includeTests` | boolean | no | `false` | Include test-project methods. |
 
@@ -159,7 +159,7 @@ Finds the types that subscribe to a C# event - a `+=` whose left-hand side is an
 | `scope` | string | no | `solution` | `solution` or a namespace prefix. |
 | `includeTests` | boolean | no | `false` | Include test-project types. |
 
-**Response.** `scope`, `note`, `event`, `typesScanned`, `subscriptionSitesChecked`, `subscriptionSitesUnresolved`, `matches`, `availableEvents` and `testMatchesFiltered`. Each hit carries the subscribing type's `name`, `namespace` and the `events` it subscribes to.
+**Response.** `scope`, `note`, `event`, `typesScanned`, `subscriptionSitesChecked`, `subscriptionSitesUnresolved`, `matches`, `availableEvents` and `testMatchesFiltered`. Each hit carries the subscribing type's `name`, `namespace` and the `events` it subscribes to. A partial type is one row with the events of all its declarations; `files` lists the subscribing files when there are several. Rows that would read alike add `fullName` (two types of one name, such as `Foo` and `Foo<T>`) or `project` (the same type compiled in two projects, as with a linked file). `typesScanned` counts types, a partial type once.
 
 **Notes.**
 
@@ -183,7 +183,7 @@ Finds symbols that carry a given attribute - the cross-cutting query that a name
 | `kinds` | string | no | `all` | `all` (types + methods + properties + fields), `type`, `method`, `property` or `field`. |
 | `scope` | string | no | `solution` | `solution` or a namespace prefix. |
 
-**Response.** `scope`, `attribute`, `kinds`, `symbolsScanned` and `matches`. Each hit carries its `kind`, `name`, `declaringType`, `namespace` and the raw stored `attributes` list, so you see the ground truth.
+**Response.** `scope`, `attribute`, `kinds`, `symbolsScanned` and `matches`. Each hit carries its `kind`, `name`, `declaringType`, `namespace` and the raw stored `attributes` list, so you see the ground truth. On the type axis a partial type is one row (its attribute lists combined) and is counted once in `symbolsScanned`; type rows that would read alike add `fullName` (`Foo` and `Foo<T>`) or `project` (the twin rows of a linked file).
 
 **Notes.**
 
@@ -238,7 +238,7 @@ What each trait means:
 | `reflection` | An external call or read whose receiver type is reflection infrastructure: `System.Reflection.*`, `Type.*`, `Activator`, `AppDomain`, `object.GetType()` or expression trees. Matched on the receiver, never on a bare member name, so a WPF `DependencyObject.GetValue`/`SetValue` accessor or a `typeof(...)` in an attribute or dependency-property registration does not count. |
 | `throws` | Contains a `throw` statement - relevant for error-path review. |
 
-**Response.** `scope`, `note`, `trait`, `methodsScanned`, `matches` and `testMatchesFiltered`. Each hit carries the method's `name`, `declaringType` and `namespace`.
+**Response.** `scope`, `note`, `trait`, `traitReading` (on `reflection` only), `methodsScanned`, `matches` and `testMatchesFiltered`. Each hit carries the method's `name`, `declaringType` and `namespace`. A `reflection` answer carries `traitReading`: this trait is anchored on the receiver of a call or read, while the `UsesReflection` flag in the exported `METHOD_INFO` is set by other signals (any `typeof`, bare reflection member names), so the two can disagree about the same method in either direction. Both readings are kept on purpose.
 
 **Notes.**
 
@@ -326,6 +326,7 @@ Lists dead-code suspects as a queryable list, where the quality insights only gi
 
 - The method axis is deliberately limited to private methods: public and internal methods have framework escapes - reflection, dependency injection, event handlers, source-generated callers - that the call graph cannot see. A private method a framework may call (`[RelayCommand]` and other framework attributes, partial methods, markup or designer event handlers, a static `Main`, a record's `PrintMembers`, `ShouldSerialize`/`Reset` methods) is skipped, and so is a method whose caller list was not analyzed (unresolved references, explicit interface implementations - also one whose interface did not bind, counted under `methodsIneligibleUnanalyzedCallers`) - skipped, not guessed. A markup-only caller counts as a real caller, so for example a Blazor `@onclick` handler is not reported, and a `nameof` of a method inside the attributes of a method (a `CanExecute` name) counts as a call.
 - Committed `*.Designer.cs` and `*.g.cs` files are read for references but never judged: nothing declared in them is reported as a candidate.
+- A partial type is one candidate and one scanned type, judged as a whole: an exemption one of its declarations earns (a static `Main`, for example) holds for the whole type.
 - A candidate marked `missingGeneratedCode: true` sits in a project where a source generator or the WPF markup compiler did not run; `generatedCodeNote` counts them. Treat them as unjudged, not as dead - the missing code may be their caller.
 - The type axis subtracts the structurally fan-in-invisible forms: interfaces, static and `*Extensions` classes, framework-, DI- and reflection-activated types (a MEF part - a type with an export attribute on itself or on a method, property or field - among them, counted under `typesIneligibleFrameworkActivated`), WPF/XAML types and MVC controllers.
 - A type is used when a `.cshtml` view the Razor generator compiled, a file of top-level statements, or markup naming it as a nested `prefix:Outer+Inner` type references it (see `find_usages`). A generic type parameter named like a solution type is not a use of it.
@@ -384,7 +385,7 @@ Finds "god object" candidate classes - a class with too many members, a Single R
 **Notes.**
 
 - Only classes are considered; records, structs and interfaces are excluded, as in the quality finding.
-- The member count is the class's declared methods plus properties plus fields. Constructors, operators and source-generated properties are deliberately not counted.
+- The member count is the class's declared methods plus properties plus fields. A partial class is one row, its members summed over all its declarations, as in the `quality-large-classes` finding; `classesScanned` counts it once. Constructors, operators and source-generated properties are deliberately not counted.
 - The floor is inclusive: a class with exactly `minMembers` members is listed.
 - On a ranked answer, a non-zero `testMatchesFiltered` is a warning about the top of the list, not only about its length: the filter can remove the largest class of all while the remaining list still looks complete.
 - Works on a recalled session.
@@ -435,7 +436,7 @@ Returns the solution-wide quality rollup in one call - the same numbers that the
 - `knownGateMetrics` lists the valid metric tokens: `critical`, `warning`, `info`, `ok`, `debt`, `complexity-max`, `ce-max`, `ca-max`, `methods` and `types`.
 - `gate` echoes the expression, `passed` and the `violatedClauses` when you passed `failOn`. It is advisory; the blocking gate remains the CLI.
 - `degradedProducers` appears only when a producer failed during the run, in which case the severity counts and the debt figure are incomplete.
-- `qualityProfile` and `layerProfile` disclose which profiles produced the numbers.
+- `qualityProfile` and `layerProfile` disclose which profiles produced the numbers. On a server without a config DB and with no `dbPath`, a `configDbNote` adds that the built-in default quality profile judged - so a `qualityProfile` of `Default` is not mistaken for a database profile of that name.
 
 **Notes.**
 

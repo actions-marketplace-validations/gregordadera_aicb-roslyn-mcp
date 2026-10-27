@@ -137,8 +137,8 @@ The three are opt-in because each is an opinion about how you should work, not p
 
 Both skills are written as a workflow. They gather the pending diff first (pushed branch, `main`, last commit, plus uncommitted changes), then check their heuristics against aicb facts before judging. If aicb is not connected, both say so explicitly: `aicb-code-review` runs a build itself rather than skipping the checks silently, while `aicb-code-simplifier` works from reading alone.
 
-- `aicb-code-review` runs aicb pre-checks on the changed solution - `refresh_session`, `get_diagnostics`, `impact_of_change` per changed symbol, `find_tests_for` and `coverage_gaps`, concurrency checks for async changes, the markup tools for XAML changes, and `list_insights` for pre-existing smells - and then works through bug classes: logic errors, boundaries, null handling, state and lifecycle, resource leaks, error handling, concurrency, async pitfalls, data integrity and security.
-- `aicb-code-simplifier` verifies its heuristics with usage, implementation and dead-code facts and then applies lenses such as unnecessary abstraction, premature generalization, nested control flow that could be flat, dead branches, stale comments and verbose tests.
+- `aicb-code-review` runs aicb pre-checks on the changed solution - `refresh_session`, `get_diagnostics`, `impact_of_change` per changed symbol, `find_tests_for` and `coverage_gaps`, concurrency checks for async changes, the markup tools for XAML changes, and `list_insights` scoped to the changed files for the pre-existing smells the diff must not worsen - and then works through bug classes: logic errors, boundaries, null handling, state and lifecycle, resource leaks, error handling, concurrency, async pitfalls, data integrity and security.
+- `aicb-code-simplifier` verifies its heuristics with usage, implementation and dead-code facts, and its size claims with `symbol_metrics` and `list_insights` on the changed files, and then applies lenses such as unnecessary abstraction, premature generalization, nested control flow that could be flat, dead branches, stale comments and verbose tests.
 
 Both accept a `--high` mode (the default, a single pass) and a `--max` mode (parallel angle-finders for higher recall).
 
@@ -156,7 +156,7 @@ It is a Node.js script that the harness runs before a tool call (`PreToolUse` in
 
 ### The one thing it refuses
 
-A **Grep** call whose pattern is a single C# symbol - a PascalCase identifier of three or more characters (optionally starting with `I`), or a `Type.Member` pair - is denied. The agent does not get search results; it gets this message:
+A **Grep** call whose pattern is a single C# symbol - a PascalCase identifier of three or more characters (optionally starting with `I`), or a `Type.Member` pair - is denied, unless one of the two exits below applies. The agent does not get search results; it gets this message:
 
 ```text
 aicb-guard: this is a C# SYMBOL query (pattern='<pattern>'). grep misses overloads,
@@ -166,12 +166,20 @@ X) / calls_external (external BCL/NuGet member) / impact_of_change (blast radius
 separate analyze step needed: pass the .sln directly as sessionId (sessionId="<abs path
 to .sln>") and the tool self-initializes. If this is genuinely a TEXT search (string
 literal / comment / log / config), restrict it to the file type (Grep glob e.g. "*.xaml"
-or "*.md") or open the specific file with Read.
+or "*.md") or open the specific file with Read. If an aicb answer about this name does
+not cover your question, this Grep is allowed once that aicb call is made.
 ```
 
-This is the only hard block. A shell command is never hard-blocked, because a shell command can do anything - `Bash` calls that look like a symbol sweep only get a note.
+The last sentence appears in Claude Code only, the one harness whose session record the guard can read.
+
+This is the only hard block, and it has two exits (see below). A shell command is never hard-blocked, because a shell command can do anything - `Bash` calls that look like a symbol sweep only get a note.
 
 Note: the message names the tools in the `mcp__aicb__...` form that Claude Code uses. Other harnesses may present the same tools without that prefix; the agent should use whatever form its own tool list shows.
+
+### Two ways past the refusal
+
+- **After an aicb call on the same name** (Claude Code): when the session - the main agent or one of its subagents - has already called an aicb tool with the symbol in its arguments, the Grep is allowed with the note `aicb-guard: '<pattern>' allowed - this session already asked aicb about it (<tool>). A text search on top is fine when that answer did not cover the question. ...`. A failed call counts; a session or file path among the arguments does not. The exit is for the agent that asked aicb first and needs more than the answer gave.
+- **Where aicb is not available** (every harness): when the session record shows that aicb's tools were removed or its server failed, or, without such a record, when no configuration file the harness reads mentions aicb at all, the Grep is allowed with the note `aicb-guard: '<pattern>' allowed - aicb is not available here (<reason>), so a text search is the only search there is. ...`. Any mention of aicb in those files counts as available, so in doubt the guard refuses.
 
 ### What it only warns about
 
@@ -179,6 +187,7 @@ Note: the message names the tools in the `mcp__aicb__...` form that Claude Code 
 |---|---|
 | `Grep` with a multi-name alternation (`A\|B\|C`), every branch symbol-shaped | Allows, with a note: no MCP tool accepts a multi-name pattern, and the one-call semantic form is `batch` with several `find_usages` sub-queries |
 | `Grep` with a mixed alternation (symbol-shaped and plain-text branches) | Allows, with a note naming the symbol branches |
+| `Grep` on a single symbol after an aicb call on that name, or where aicb is not available | Allows, with a note naming the reason (see "Two ways past the refusal") |
 | `Bash` with `grep`, `rg` or `findstr` on a symbol-shaped pattern | Allows, with a note preferring the semantic tools |
 | First `Edit`, `Write` or `MultiEdit` on a `.cs` file in a session | Allows, with a reminder to run `impact_of_change` first and `refresh_session` + `get_diagnostics` after |
 | Codex `apply_patch` touching a `.cs` file | The same reminder, once per session (shared with the edit reminder) |
@@ -191,7 +200,7 @@ Everything except the refusal is a non-blocking reminder. Only the refusal preve
 ### When the guard stays silent
 
 - **No `*.sln` directly in the project directory** - the guard is completely quiet in a non-.NET project or in a directory that only contains sub-projects.
-- **A search scoped away from C#** - a non-C# `glob` or `type` (for example `*.xaml`, `*.md`, `*.json`), or a `path` that points at one concrete file. A file-scoped search is a targeted text scan, not a codebase-wide symbol sweep.
+- **A search scoped away from C#** - a `glob` whose every piece ends in a literal non-C# extension (for example `*.xaml`, `*.md`, `*.mjs`), a non-C# `type`, or a `path` that points at one concrete file. A negated glob (`!*.md`), a wildcard in the extension (`*.c?`, `*.verified.*`) and a glob list that includes `*.cs` still count as a search over C# files. A file-scoped search is a targeted text scan, not a codebase-wide symbol sweep.
 - **A pattern with regex structure** - groups, character classes, quantifier braces (`()[]{}`) or `=>`. Such a pattern is a text search, never a bare symbol query.
 - **Plain text by shape** - all-lowercase or snake_case names, UPPER_SNAKE constant or config keys, phrases containing spaces, paths and version strings are not symbol-shaped and pass through.
 
@@ -216,18 +225,20 @@ Note: these marker files are harmless and can be deleted at any time; the guard 
 
 `auto` is the default because writing enforcement for a harness a project does not use is not neutral: it drops configuration files into a repository you would then have to explain.
 
-Detection asks whether a **marker directory** exists in the project - `.claude/`, `.codex/` or `.opencode/`. A marker counts as evidence when it contains at least one entry that `aicb init` itself would not have written there, because `init` creates `.claude/skills/` on every run and must not read its own side effect as proof that Claude Code is in use. Two boundary cases are deliberate:
+For Claude Code, a `CLAUDE.md` file in the project directory is evidence by itself: `init` never writes one, so its presence shows the project's own use. Otherwise detection asks whether a **marker directory** exists in the project - `.claude/`, `.codex/` or `.opencode/`. A marker counts as evidence when it contains at least one entry that `aicb init` itself would not have written there, because `init` creates `.claude/skills/` on every run and must not read its own side effect as proof that Claude Code is in use. Two boundary cases are deliberate:
 
 - An **empty** marker directory counts as evidence.
 - A non-empty marker counts only when it has at least one child that aicb does not create itself. For `.codex/`, `hooks/` and `cache/` are self-created; for `.opencode/`, `plugins/` and `cache/` are self-created. A marker containing only those children therefore does not count.
 
-The price of this rule is a false negative in the safe direction: if your `.claude/` directory contains only your own `skills/` folder, `auto` does not recognize Claude Code. You then get the explicit line
+The price of this rule is a false negative in the safe direction: if your `.claude/` directory contains only your own `skills/` folder and the project directory has no `CLAUDE.md`, `auto` does not recognize Claude Code. You then get the explicit line
 
 ```text
 No agent harness detected here, so no symbol guard was installed and this run registered the server only in .mcp.json (read by Claude Code). Pass --hooks claude-code|codex|opencode (or --hooks all) to wire one anyway - for Codex and OpenCode that also registers the server in their own config.
 ```
 
 and install it yourself with `--hooks claude-code`. Nothing is installed unasked.
+
+Only the project directory itself is checked for `CLAUDE.md`; a file in a parent folder or a `CLAUDE.local.md` does not count. Codex and OpenCode have no such file (`AGENTS.md` is read by several harnesses and identifies none of them). The reverse case: a project that keeps a `CLAUDE.md` for another agent also gets the Claude Code guard; `--hooks` with an explicit harness, or `--hooks none`, overrides the detection.
 
 ## 2.9 What a run reports
 
@@ -304,7 +315,7 @@ Exit codes: `0` on success, `1` if `--hooks` was invalid, the target directory d
 
 After a default `aicb init` in a Claude Code project, the following changes for the agent working in that project:
 
-1. A `Grep` search for a C# symbol name is **refused**, and the agent is redirected to the aicb tool that answers the question properly.
+1. A `Grep` search for a C# symbol name is **refused**, and the agent is redirected to the aicb tool that answers the question properly. Once the agent has asked aicb about that name in the session, or where aicb is not available, the search goes through with a note.
 2. An `Edit`, `Write` or `MultiEdit` on a `.cs` file produces a one-time-per-session reminder to run `impact_of_change` before the change.
 3. A `Read` of a file of 50 KB or more without a slice produces a reminder once per session; at 100 KB or more, every time.
 4. `dotnet build` or `dotnet test` produces a one-time-per-session reminder about the faster diagnostics path.

@@ -90,6 +90,8 @@ The row is multi-select; no active chip means "all severities". The `All` chip (
 4. Depending on solution size the run takes roughly 3-15 seconds. The first-run card names the same range: `approx. 3-15 seconds depending on size`.
 5. The results replace the previous list, grouped by severity. The tab header now shows the count.
 
+After the run the page header also names the quality profile it used, `Profile: <Name>`, left of `Analyze Solution`. Its tooltip reads `Quality profile used by the last analysis. The active template's profile wins over the one chosen in Settings.` This matters when a template pins a profile: the built-in `Onboarding` and `Documentation` templates pin a profile that switches the producers off, and an empty result then says nothing about the solution. A result restored from an earlier run shows no profile, because which profile that run used is not stored; the label appears once the background recomputation (see "Automatic runs") or your next run replaces the restored result.
+
 A run evaluates the 24 analyzer rules in the shipped configuration. The active Quality Profile can switch individual exposed rules off, so the effective set depends on your profile. The rule catalog and the profile options are described in "Insights: the code quality catalog" in the General manual; the profile itself is edited under `Settings` → `Quality Profiles`. The first-run card points there as well: `Configure producer toggles + thresholds under Quality Profiles in Settings.` LLM findings are promoted from a model run rather than evaluated by this analysis run.
 
 ![The first-run card of the Insights tab](img/gui-insights-first-run.png)

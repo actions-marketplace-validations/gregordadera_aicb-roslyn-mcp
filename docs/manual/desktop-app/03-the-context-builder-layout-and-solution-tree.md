@@ -188,13 +188,13 @@ Each row has five cells, left to right:
 
 ### Filters and search
 
-The filter row sits above the tree and wraps onto several lines when the sidebar is narrow.
+The filters sit above the tree in three rows that keep their order at any sidebar width: the two visibility switches, the `Level` filter, and the update switch with the `Update` button on the right.
 
 | Control | Effect |
 |---|---|
 | `Public methods only` | Hides non-public methods. Off shows all methods. |
 | `MD content only` | Shows only the symbols that actually enter the generated document - the exact set after the `Max MD size` trimming, with the hierarchy kept. Off shows the full tree. The set is computed when you toggle the option and after `Create MD`; with `Auto Update` off, the tree applies it when you press `Update`. |
-| `Level:` | Shows only rows whose effective detail level matches the choice, plus their parent chain. `All` clears the filter. |
+| `Level` | Shows only rows whose effective detail level matches the choice, plus their parent chain. `All` clears the filter. |
 | `Auto Update` | Off by default. While off, filter and view changes do not recompute the tree immediately; they arm the `Update` button instead. |
 | `Update` | Applies the pending tree update. It turns red while a deferred change is waiting. |
 
