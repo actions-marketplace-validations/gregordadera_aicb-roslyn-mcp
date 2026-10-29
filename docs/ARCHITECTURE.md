@@ -283,7 +283,7 @@ Before treating an empty or short result as proof, inspect the response metadata
 | Signal | Meaning | Typical action |
 |---|---|---|
 | `staleness` | Saved source has moved since the session was analyzed, or an automatic refresh ran or failed | Save files and call `refresh_session` if needed |
-| `incompleteProjects` | One or more project compilations could not resolve core references, so semantic edges may be missing | Restore/build, then `refresh_session(force: true)` |
+| `incompleteProjects` | One or more project compilations could not resolve core references, so semantic edges may be missing | Restore, then `refresh_session`; after a build, `refresh_session(force: true)` |
 | `totalFound` and `truncated` | The tool found more items than it returned | Raise the relevant cap or narrow the query |
 | Bundle manifest / leading comment | Tests, siblings, types or methods were omitted under the token budget | Increase the budget or request the omitted axis directly |
 | Dynamic/unknown placeholders | A relationship exists syntactically but its target cannot be established statically | Verify runtime configuration or construction code |
