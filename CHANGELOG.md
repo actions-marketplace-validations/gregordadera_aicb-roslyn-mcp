@@ -112,9 +112,11 @@ also rewrites aicb's own server entries (see "`aicb init`, the symbol guard and 
   implementations or tests axes is not a measured negative. The line counts against the token
   budget. On a complete run nothing changes. `find_by_concurrency_risk` names the projects without
   restore output too, because two of its risk kinds come up short there.
-- **An empty configuration database file stays empty.** A zero-byte file passed as the
-  configuration database is treated as no database: no tool writes tables into it any more (before,
-  some calls grew it to hundreds of kilobytes), and the answer carries a `configDbNote` saying so.
+- **An empty configuration database file stays empty.** A zero-byte file passed to a tool as its
+  `dbPath` is treated as no database: no tool writes tables into it any more (before, some calls
+  grew it to hundreds of kilobytes), and the answer carries a `configDbNote` saying so. The
+  server's own start option `aicb mcp --db-path` still sets up its database in the file it is
+  given.
 - **The text that `explain_symbol` and `prepare_task` repeat from your input** (the symbol, the
   goal) is still cut at 120 characters, but the cut no longer splits a character such as an emoji
   into two halves.
