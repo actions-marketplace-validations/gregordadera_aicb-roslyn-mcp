@@ -4,7 +4,7 @@ Versions follow `Major.Minor.Series.Build`. The build number rises by one for ev
 change that lands, so gaps between published versions are normal - not every build is
 released.
 
-## 0.5.510.1 (unreleased) - call_graph walks through constructors, a cancelled analysis waits for the retry, and a file shared by several projects renders once
+## 0.5.510.1 (2026-10-29) - call_graph walks through constructors, a cancelled analysis waits for the retry, and a file shared by several projects renders once
 
 This release collects more changes than usual, so its entry is longer than usual too. The
 sections below follow the questions you ask the server; the desktop app and `aicb init` come
