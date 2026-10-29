@@ -106,6 +106,13 @@ It returns the transitive fan-in, including consumers the compiler will not flag
 `find_usages` shows only direct callers; the compiler shows only type errors.
 Neither is the same question.
 
+Then check the two channels the C# fan-in does not carry. **Markup**:
+`find_binding_usages` for a property a view binds, `find_resource_usages` for a
+resource key. **Pinned text**: a test that asserts a doc comment, a tool
+description or an error message as a string pins the WORDING, not the symbol -
+search the old wording before you change it. Both are where a careful fan-in
+analysis still misses a site.
+
 Treat the reported `risk` level as a measure of **fan-in size, not of your
 change**. A purely additive change to a high-fan-in type is expected to read
 "high" - that is not a stop sign. Check instead whether any consumer relies on
@@ -198,7 +205,8 @@ Ask this before every text search:
 - **Text stays text**: string literals, comments, log messages, config keys,
   version strings, SQL, regexes.
 - **Non-C# files stay grep**: `.xaml`, `.json`, `.csproj`, `.md`, `.yml`. The
-  fan-in graph covers C# edges only - markup and generated bindings are not in it.
+  fan-in graph covers C# edges plus the markup forms listed under "Limits worth
+  knowing" below; source-generated code is not walked.
 - Reading a file you are about to edit is always fine.
 
 `aicb` is **read-only**. It never writes; make changes with your normal edit
@@ -218,10 +226,16 @@ the repository.
 - Opening a solution runs its MSBuild logic to resolve references, exactly like
   an IDE - analyze only solutions you trust.
 - Results reflect the last analysis: after **your own** edits, `refresh_session`.
-- The fan-in graph carries exactly **two** markup edge kinds: a `{Binding}` ROOT
-  member (low-confidence, tagged `(xaml)`, against the resolved view-model) and a
-  TYPE reference. Everything else in markup is invisible to it - a resource key,
-  and the MEMBER half of any attribute (a `Click=` handler, an `{x:Static}`
-  member) - so reach for `find_binding_usages` / `find_resource_usages` or a text
-  search there. (Broken `{Binding}` members are a separate, opt-in check:
+- The fan-in graph records these markup forms (`.xaml` and `.axaml`): a
+  `{Binding}` ROOT member (low-confidence, tagged `(xaml)`, against the resolved
+  view-model), an event wire to a code-behind method (`Click=` and the other event
+  attributes), an `{x:Static}` member, an attached-property accessor, a property
+  site (attribute, property element, `Setter`/`Trigger` `Property=`), a
+  `{TemplateBinding}` member, and a TYPE reference. Not in it: a resource key
+  (`find_resource_usages`), a `{Binding}` inside a Style or ControlTemplate other
+  than the element's own inline style (unless its member is on the page
+  view-model), and anything activated by name at runtime. An empty `find_usages`
+  answer names these gaps in its `note` - read it before concluding "unused". For
+  "who binds X in markup", `find_binding_usages` is still the direct question.
+  (Broken `{Binding}` members are a separate, opt-in check:
   `find_unresolved_bindings`.)

@@ -4,6 +4,519 @@ Versions follow `Major.Minor.Series.Build`. The build number rises by one for ev
 change that lands, so gaps between published versions are normal - not every build is
 released.
 
+## 0.5.510.1 (2026-10-29) - call_graph walks through constructors, a cancelled analysis waits for the retry, and a file shared by several projects renders once
+
+This release collects more changes than usual, so its entry is longer than usual too. The
+sections below follow the questions you ask the server; the desktop app and `aicb init` come
+last.
+
+**Who is affected.** Everyone on the MCP server: reconnect your client once - 20 tools of the
+default profile have a new description or parameter description (`analyze_solution`,
+`call_graph`, `check_solution_config_drift`, `explain_symbol`, `find_by_event_subscription`,
+`find_by_semantics`, `find_implementations`, `find_resource_usages`, `find_symbol`,
+`find_tests_for`, `find_unresolved_bindings`, `find_usages`, `impact_of_change`,
+`init_solution_config`, `list_insights`, `resolve_injection`, `save_session`, `server_info`,
+`solution_config_status`, `symbol_signature`), and outside the default pool so do
+`find_by_resource_leak`, `find_god_objects`, `recall_codebase`, `remember_codebase` and
+`type_dependency_path`. No tool or parameter was added, removed or made required, and no default
+changed. The handshake no longer declares `tools.listChanged` (see "MCP protocol").
+
+**Scripts that read these answers should check the following:**
+
+- `init_solution_config`: the items of `referencedNamespaces` are objects now
+  (`{namespace, documents, ...}`, heaviest first) instead of plain strings in alphabetical order.
+  Read `.namespace` for the name.
+- `resolve_injection`: a multi-targeted project's registration is one row with a new
+  `targetFrameworks` list instead of one row per target framework, and `project` carries no
+  framework suffix on such a row, so `matchCount`, `testRegistrationsFiltered` and
+  `multiRegistration` can drop. `GetService` calls inside a registration factory leave
+  `otherConsumers`.
+- `find_implementations`: the items are ordered differently (direct implementers first), and an
+  interface that extends the queried one is marked `via: "derived-interface"`.
+- `find_tests_for`: two new `matchReason` values (`command`, `command-via`) and an optional
+  `testTypeFullName` on rows that would otherwise read alike.
+- `find_usages` and `impact_of_change`: two new `textualBindingKinds`, `viaImplementation` and
+  `viaUsingDisposal`, always present (at 0 where they do not apply).
+- Answers of a session recalled from an older snapshot: the label `GENERATED CODE NOT KNOWN` is
+  replaced by three labels (see "Remembered codebases").
+- Coupling numbers (`ce`, Ce in hotspots and `solution_metrics`) move: some up, because code-only
+  references now count, and many down, because a type's own nested types and the array or
+  nullable spellings of one type no longer count extra (see "Coupling, quality and effects").
+  Anyone tracking them over time sees a one-time step.
+
+**After updating:** every snapshot and saved session of an earlier version is analyzed afresh the
+first time a session is restored from it (`compare_with_previous` still compares against an older
+snapshot as it was stored, so a comparison across the update can show differences that come from
+the new analysis), a codebase remembered with an earlier version is recalled as `stale` until
+`refresh_remembered`, and the first open of each solution runs a full design-time build once
+(the build cache of earlier versions is not reused). The configuration database is not changed by
+this version, so an older desktop app still opens it. Projects set up with `aicb init`:
+`aicb init --force` refreshes the installed symbol guard and the `aicb-csharp-context` skill, and
+also rewrites aicb's own server entries (see "`aicb init`, the symbol guard and the skill").
+
+### Analysis runs and sessions
+
+- **A client that cancels `analyze_solution` no longer throws the analysis away.** Before, a
+  client with a hard timeout cancelled the load, and the retry started from scratch, so a solution
+  that took longer than the client's deadline could never be analyzed. Now the analysis keeps
+  running and lands in the server's session cache. A later `analyze_solution` with the same
+  arguments, within ten minutes after the analysis finished, gets that result in well under a
+  second - as long as nothing it read has changed since (source files, solution and project files,
+  build files in the folder and above it, the `.aicb.json` file, a restore) and the analysis was
+  complete. Otherwise it analyzes again. A solution with a project outside its own folder is always analyzed again. This works
+  wherever the server is started, not only in the solution folder.
+- **The "analysis is running" message tells you what to do.** A call that waits too long behind a
+  running analysis still gets an error, but the message now says the analysis keeps running, that
+  its session is cached when it ends, and that a retry after that is answered from the cache. A
+  call with a different layer profile or database is told that its retry runs its own analysis.
+  A load stopped by a server shutdown says so instead of showing a bare cancellation.
+- **The first call of any tool with a solution path reports progress** when the client asks for
+  progress, as `analyze_solution` always did. A cancelled first call returns at once instead of
+  holding on until the load ends, and its result can be picked up by a later `analyze_solution`.
+- **Closing the client stops a running analysis.** When the client closes the connection while an
+  analysis or a refresh runs, the server now exits within about a second instead of finishing the
+  work first, however long that took.
+- **Editing a `.cs` file that no project compiles no longer reloads the solution:**
+  `refresh_session` answers `changed: false` and names the skipped file ("C# file(s) outside every
+  compilation"), where it ran a full reload before. It still reloads when build files above the
+  solution folder changed or a project lies outside it. A renamed non-C# file is named on both
+  sides ("file added", "file removed").
+- **Files imported from outside the solution folder are watched.** A project file that pulls in
+  an MSBuild file from outside the solution folder with an explicit `<Import>` (also through
+  `Directory.Build.props` or `.targets`) did not count as a change when you edited that file:
+  `refresh_session` said `changed: false`, and the design-time build cache answered with the old
+  build. Both notice the edit now. Imports
+  added by the SDK itself, and imports whose path needs an MSBuild evaluation, are still not
+  followed.
+- **The restore note no longer asks for `force`.** The note about projects without restore output
+  now says to run `dotnet restore`, then `refresh_session` - an ordinary refresh already notices a
+  restore; it no longer asks for `force: true`.
+- **`server_info` speaks per solution.** Its ANALYZER DRIFT line compared the server's build with
+  one analyzed repository - whichever came first, possibly another client's - and called it "the
+  repo it is analyzing". Now each analyzed solution folder (up to four, most recently used first)
+  gets its own line naming the solution, a non-zero distance names the commit and branch it was
+  counted against, and the answer says that `server_info` cannot tell which session is yours. A
+  folder in a repository that does not contain the server's build commit gets no line; when the
+  probed folders are all such and more were not probed, it says `drift NOT MEASURED` and names
+  them. Scripts that read this line must expect one line per solution.
+- **A "not found" can point at a stale checkout.** When `find_usages` or `impact_of_change` find
+  no symbol of that name, the answer now adds how many commits that touch `.cs` files the analyzed
+  checkout is behind `origin/HEAD`, as of your last fetch (nothing is fetched). It is silent when
+  the checkout is current or ahead, or has no `origin/HEAD`.
+- **Every slice tool says when the analysis run was incomplete.** When some projects could not
+  resolve their references (typically never restored or built), a short list of users or a
+  "(none)" in the tests looked like an honest result. Now `get_context` and `pack_for_task` start
+  with a comment line `<!-- run: THIS ANALYSIS RUN WAS INCOMPLETE ... -->` that names the
+  projects (five at most, then a count) and the repair, and the leading manifest of `prepare_task`
+  and `explain_symbol` carries a `run:` segment saying that a "(none)" on the callers,
+  implementations or tests axes is not a measured negative. The line counts against the token
+  budget. On a complete run nothing changes. `find_by_concurrency_risk` names the projects without
+  restore output too, because two of its risk kinds come up short there.
+- **An empty configuration database file stays empty.** A zero-byte file passed to a tool as its
+  `dbPath` is treated as no database: no tool writes tables into it any more (before, some calls
+  grew it to hundreds of kilobytes), and the answer carries a `configDbNote` saying so. The
+  server's own start option `aicb mcp --db-path` still sets up its database in the file it is
+  given.
+- **The text that `explain_symbol` and `prepare_task` repeat from your input** (the symbol, the
+  goal) is still cut at 120 characters, but the cut no longer splits a character such as an emoji
+  into two halves.
+
+### Who uses this symbol (`find_usages`, `impact_of_change`)
+
+- **References that only exist in code count as dependencies.** A type named only through a static member
+  (`Math.PI`-style), a method group, `typeof`, `nameof`, a cast or a pattern, a typed local, or a
+  creation inside an accessor, constructor or initializer is now a dependency of the type that
+  writes it: it is in that type's dependency list, the target lists it under `USED_BY`, and it
+  counts toward Ce and Ca. `find_usages` already listed such users; the dependency lists and the
+  coupling numbers now agree with it.
+- **Array creations count.** A type named only in an array creation (`new T[3]`, `new T[] { }`,
+  jagged and multi-dimensional arrays, `new List<T>[3]`, `stackalloc T[n]`) had no user, so
+  `find_usages` answered 0, `impact_of_change` answered 0 with risk `none`, and `find_dead_code`
+  called the type dead. Now the type that writes the creation is a user, and `T` (not `T[]`) is the
+  dependency.
+- **`Dispose` through `IDisposable` has callers.** A qualified `Type.Dispose` or
+  `Type.DisposeAsync` query showed 0 callers when the callers got the object from a factory typed
+  as the interface (`using var s = pool.PushScope();`) or disposed it through the interface. Those
+  callers are now credited, also where a factory builds the object through one private helper or
+  is the only production implementation of an interface member, and the answer carries a
+  `viaBclInterface` block (counts of disposers and of the callers that obtain the object, and the
+  factories) under
+  `viaContract`. Callers that cannot be told apart between same-named nested types are counted as
+  `ambiguous` in the note instead of credited; then `verify_claim` answers
+  `indeterminate` instead of confirming that the method is unused, and the `explain_symbol`
+  manifest says how many callers could not be attributed. A bare `Dispose` query takes no such
+  credit.
+- **Two more kinds of users the source never names:** `viaImplementation` (the user hands on a
+  value of another solution type that implements or derives from the queried one - it breaks with
+  that type, not this one) and `viaUsingDisposal` (on a `Dispose` query, the user disposes with
+  `using` - it breaks only if the type stops being disposable). Users that were `unclassified`
+  move into them, and `textualBindingNote` says what breaks each.
+- **`impact_of_change` labels what is reached only through dependency injection.** On a type, a
+  new `registration` block names the part of the impact that exists only through a
+  `Microsoft.Extensions.DependencyInjection` registration (`Add*`, `TryAdd*`, `ServiceDescriptor`):
+  a rename dependency, not a use. Counts and risk do not change; the edge is labelled, not
+  dropped. The label stays off where the registering code names the type in any other way (a cast,
+  an array, a constraint, an attribute), so it errs on the side of silence. Autofac and
+  non-generic `AddSingleton(typeof(X), ...)` registrations are not recognized.
+- **`impact_of_change` on a property lists where it may be serialized:** a new `serializers` block
+  names the methods that name the property's type beside a serializer call (System.Text.Json,
+  Newtonsoft.Json, XmlSerializer, DataContract, YamlDotNet, MessagePack and the HTTP JSON
+  extensions), and `namePinnedBy` names a `[JsonPropertyName]` that keeps the wire name stable
+  (System.Text.Json only). It is a name match, not a data-flow proof, and the note says so.
+- **`impact_of_change` on an attached property's field** (a static `XProperty` registered with
+  `RegisterAttached`) adds an `attachedProperty` block that lists the `GetX` and `SetX` accessors
+  and the markup files that use them (up to ten each). The counts and the risk are unchanged.
+- **A generic and a non-generic type of the same name are kept apart** in the transitive part of
+  `impact_of_change`: a reference written as `Gadget<T>` no longer counts as one to a
+  non-generic `Gadget`. Transitive counts can only shrink; the direct answer still covers every
+  arity of the name. `type_dependency_path` walks the same graph now, so a path exists exactly
+  when `impact_of_change` lists the type; a step prints the full name where several types share a
+  simple name.
+- **`find_usages` on a type a view declares as a resource** adds a `resourceKeyNote`: the views
+  that use it through `{StaticResource key}` are listed by `find_resource_usages`, not here.
+- **Better "nearest" suggestions.** A mistyped member of a type you named (`Type.Membr`) is now
+  suggested in its qualified form (`Type.Member`), and a name you cut short (`OrderViewM`) is
+  steered to the name it begins rather than to a similar-looking one. A very short name (under five
+  characters) no longer gets a guessed typo correction, which mostly pointed at an unrelated name;
+  a short name that differs only in letter case is still suggested. The price: a real typo in a
+  short name now goes without a suggestion.
+- **`find_symbol` with no hit and no suggestion** adds a `note` that a missing name proves a
+  missing string, not a missing feature.
+- **`explain_symbol` on a method name several types declare:** where a member of one of those
+  types calls another type's method of that name, the calling member is now shown with its code,
+  and the manifest says so (up to eight such types, the rest counted). Such queries are also
+  faster.
+
+### Markup: XAML views, Razor views and top-level programs
+
+- **Bindings in an element's own inline style count.** A `{Binding}` inside a `DataTrigger`, a
+  `Condition` or a `Setter` of the style an element declares for itself (`<X.Style><Style>`) is now
+  a markup use of the view-model member and is judged by `find_unresolved_bindings`. Keyed or
+  implicit styles, a style passed as a setter value, item-container styles, and a template inside
+  the style stay unread, and the zero-fan-in note of `find_usages` says which.
+- **The view-model code assigns counts, also beside a design-time hint.** When production code
+  sets a view's `DataContext` (`DataContext = this`, an assigned base class, two different assigned
+  types), the view's bindings now count as uses of every type it assigns, not only of the type the
+  markup names. A view's own `ViewModel` property, or a member of an assigned base type, no longer
+  looks unused. Where the assigned type does not agree with the markup's hint,
+  `find_unresolved_bindings` skips the page's view-model bindings under the new reason
+  `codeAssignedDataContext` instead of judging them against the hint; that removes a class of false
+  reports seen in ReactiveUI-style views.
+- **`find_resource_usages` lists keys no markup defines.** Its audit view now also names every
+  referenced resource key that no markup in the solution defines, split into
+  `misspelledKeyCandidates` (one slip from a defined key, with `nearestDefined`) and
+  `notDefinedInSolutionKeys` (most often a theme's or the platform's key - unknown, not broken).
+  The earlier fields are unchanged.
+- **Handlers wired in XAML are found.** `find_by_event_subscription` read only `+=`, so a handler
+  wired in markup (`Click="OnClick"`, `Loaded=`, a `CommandBinding`) was missing, and a type that
+  wired only in markup had no row. Each row now carries `markupWires` (per handler the number of
+  views and up to ten of them), and a markup-only type appears with an empty `events` list. A
+  markup wire carries no event name, so `eventName` cannot select it; under such a filter
+  `markupWireTypesNotFiltered` and a note count what was left out. At the 200-row cap rows with C#
+  events are kept first. Answers grow, in one measured case to three times their size.
+- **Released and unreleased subscriptions:** each row of `find_by_event_subscription` also carries
+  `unreleased`, the subscriptions no matching `-=` on the same type releases. An empty list means
+  everything is released, an omitted list means not measured (a note says why).
+- **Code-behind split over two files is one type for the dead-code tools.** A class with a
+  `*.xaml.cs` code-behind and a second hand-written partial file could be reported dead through
+  the second file, and a handler the markup wires could be reported as an unused private method
+  there. Now the markup exempts the type in every file and its wired handlers count in every file;
+  every other member is still judged. This mattered mostly where the generated half is missing
+  (an unbuilt WPF project) and in Avalonia.
+- **Razor views and top-level programs credit what they use without spelling it.** A compiled
+  Razor view and a file of top-level statements now credit types by one rule, which only ever adds
+  users:
+  - a view credits the types of a method it calls (declaring, return and parameter types), so a
+    view that calls a member of an `@inject`ed service is a user of that service type;
+  - a view credits the type a record `with` produces and the type a collection expression
+    converts to; a top-level program credits the type a `var` infers (`var`, `foreach`, `using`,
+    `out var`);
+  - both credit what an unspelled form carries: type arguments and array element types
+    (`var xs = holder.Items` of a `List<Hidden>` credits `Hidden`, `Point?` credits `Point`), the
+    type arguments of a containing generic (`dictionary.Values`), pointer and function-pointer
+    types, tuple and deconstruction elements, and the locals a `var` pattern declares.
+- **`resolve_injection` reads Razor `@inject` from the files a project compiles.** A view the
+  project excludes no longer counts as a consumer, and a view linked in from another folder now
+  does. A project that compiles no Razor file (runtime-compiled views, older frameworks) keeps
+  reading its folder as before. When a Razor file cannot be read, the note now says so instead of
+  counting nothing.
+
+### Call graph and flow
+
+- **`call_graph` follows object creation.** A `new X(...)` was not an edge in `call_graph`, and a
+  callers walk stopped at a constructor. Now a creation is an edge to the constructor it binds
+  (keyed `Ns.X.X(params)`, the form `find_usages` takes), and both directions walk on through it:
+  callees into what the constructor calls and creates (`: base(...)` and `: this(...)` included),
+  callers out to the code that creates the object. Answers grow (in one measured repository a
+  quarter of the answers moved, about half again as many bytes), and the 500-edge cap is reached
+  more often. A graph cannot be rooted at a constructor; `trace_flow` does not follow creations.
+- **`call_graph` takes `Type.Method`.** A qualified name rooted nothing; now it roots that type's
+  declarations, overloads included. A bare name behaves as before.
+- **Callers through interfaces.** With `direction: "callers"`, every node now also brings in the
+  callers of the interface or abstract members it implements, at every hop. Those members are
+  named in a new `viaContract` block with their implementation count (one = exact, several = a
+  union) and the nodes that brought them in (`creditedBy`).
+- **The flow sections of the export show creations:** ENTRY_POINT_FLOW lists an entry point's
+  creations, a top-level program whose only use of the project is a creation appears in
+  ENTRY_POINTS, and ARCHITECTURE_FLOW gains an edge for a creation of an architectural type.
+
+### Implementations of interfaces
+
+- **A closed query reads as the compiler reads it.** `find_implementations` with a closed
+  interface name now finds what C# would bind: `IHandler<string?>` finds the closers of
+  `IHandler<string>`, `IHandler<Nullable<int>>` finds the `int?` closers, a tuple without element
+  names matches a named one. A solution type named `String` is no longer merged with the keyword
+  `string`. Where the facts cannot decide, the closing is reported as unread
+  (`closing: "unresolved"`) rather than as another closing. `resolve_injection` matches a
+  `Nullable<int>` query to an `int?` registration too.
+- **Direct implementers first.** The items of `find_implementations` were sorted by name only, so
+  on a page cut at 100 the types that implement the interface themselves could fall off behind
+  types that inherit it. Now items without `via` come first, then by name; the set and the counts
+  are unchanged. An interface that extends the queried one stays in the list, marked
+  `via: "derived-interface"`, so it no longer looks like an implementer.
+
+### Tests (`find_tests_for`)
+
+- **Tests that run a generated command are found.** A test that reaches a method only by running
+  the command a CommunityToolkit `[RelayCommand]` generates for it was invisible. Two new strong
+  tiers: `command` (the test reads the generated command and executes it) and `command-via` (the
+  same through one helper method, or through a `[RelayCommand]` method that calls the target). A
+  `CanExecute` check alone does not count. When `assert_absence` refutes "X has no tests", it says
+  how many of the tests run the generated command.
+- **Same-named test classes are told apart.** Two test classes of one name in different
+  namespaces were merged into one row; now each has its own, and `testTypeFullName` appears on the
+  rows that would otherwise read alike. The tests axis of `explain_symbol` and the other slice tools
+  no longer shows a same-named test class that never reaches the symbol.
+- **The two-hop limit is said wherever it applies.** When every strong row reaches the symbol
+  through one method in between (`invokes-via`, `accesses-via` and the like), the answer now leads
+  with the note that the evidence reaches two hops at most - for types, methods, operators,
+  properties and fields. Before, only an empty answer said it.
+- **Tests that only read a constant** of a type are counted in the note of a type answer, with the
+  member query that lists them.
+- **Test attributes are matched as words.** A custom attribute counts as a test marker when the
+  marker is a whole word at the start or end of its own name: `[FactMySql]`, `[Fact_Slow]`,
+  `[SkippableFact]` count; `[Factory]`, `[Artifact]`, `[Latest]` no longer do (a production
+  `[Factory]` method made its type a test fixture before). `[TestCaseSource]` is a default marker.
+  The attributes by which `find_dead_code` exempts test, routing and generator types are matched as
+  whole words too (test markers at the start or end of the name, the others at its end), so some
+  types that were exempted by a lookalike attribute are judged now. If you configured a custom
+  marker that only matched inside a longer name, check it.
+
+### Dependency injection (`resolve_injection`)
+
+- **Null-conditional registrations are read:** `services?.AddSingleton<IFoo, Foo>()` and every
+  other `?.` form was not a registration at all.
+- **A receiver that changes is noticed.** When the service collection variable is reassigned (or
+  passed `ref`/`out`, or written in a lambda) between registrations, `effectiveRegistration`
+  answers `winner: null` and names the line, since the calls may go to different collections. The
+  fluent `services = services.AddX()` form stays readable.
+- **Same-named types are kept apart.** `multiRegistration` and `ambiguous` are judged per service
+  type, not per simple name, so two different types of one name, each registered once, no longer
+  read as a conflict. A qualified query (`App.Settings.IPanel`) keeps only that type and counts the
+  namesakes it left out.
+- **One row per call in a multi-targeted project.** Identical rows of each target framework are one
+  row, with `targetFrameworks`; a call only some frameworks compile stays apart and the note names
+  it with its frameworks. In one measured library a query went from 183 rows to 65.
+- **The container's own wiring is not a consumer.** A `GetService` call inside a lambda passed to a
+  registration (`AddSingleton<IFoo>(sp => sp.GetRequiredService<Foo>())`) no longer counts in
+  `otherConsumers`; the note says how many were left out and where. `ambiguous` is described as a
+  possible conflict.
+- **Wrapper registrations that forward a parameter are read.** A registration made through a
+  project helper inside a method that hands on its own parameter was dropped; it is a row at that
+  method now. An instance or key that is forwarded reads `(dynamic)`, except where the parameter
+  type is exact (a sealed class or a value type). A helper nobody calls that passes a fixed service
+  on to another helper keeps its body line as a row.
+- **Unusual spellings of the queried type are read.** A nested type of a generic type
+  (`Outer<int>.IInner`), reflection names (`+` for nesting, `` `1[[...]] `` for type arguments,
+  assembly-qualified names) and a nested type's own closing are understood. A name with stray
+  whitespace or brackets is answered for the cleaned name and the note says how it was read. A
+  query that names no type at all (`App.`) is now an input error with a clear message, in the
+  tool and in `aicb call`.
+
+### Exported Markdown and context slices
+
+- **A file compiled into several projects renders once.** A source file linked into several
+  projects rendered one identical FILE block per project. Where the block reads the same in every
+  project, it is written once with a `CompiledInto: A, B, C` line, the other projects carry a
+  one-line pointer to it, and FILE_INDEX lists the file once. Copies that read differently (an
+  `#if` per project, for example) keep their own block. Because budgets count rendered text, the
+  room this frees is filled with more types: on one measured multi-assembly library the whole
+  export shrank to about half, and a `get_context` answer kept all 16 types instead of 12.
+- **A type's namespace is its own.** A file with several namespace blocks, a nested block or a
+  type in the global namespace named its first namespace for every type. Now each type carries its
+  own, and the FILE header lists the namespaces of the types it holds (`(global namespace)` for
+  the global one). `find_structural_twins` uses the type's own namespace too.
+- **A partial method is one method.** A partial method declared and implemented in source was two
+  METHOD blocks, was listed twice by `find_symbol`, and its context could come from the empty
+  declaration. Now it is one method that carries the declaration's documentation where the
+  implementation has none.
+- **An `<ai layer>` on one part of a partial type applies to every part** of that type in its
+  project and to their methods, so one type no longer renders with two layers.
+- **Clearer method sentences.** A method whose only act is a throw read "modifies state"; it now
+  reads "Can throw an exception". A method without a body read "Self-contained"; it now reads
+  "Declares no body". A method that only calls external code gets a sentence. An interface method
+  takes its sentence from a concrete implementation, not an abstract one.
+- **Method code extracts are exact far more often.** The extract of a method no longer pulls in a
+  preceding expression-bodied member, a type header, a comment or a preprocessor line, and a `<`
+  operator in a default value no longer breaks overload matching (measured on one large
+  repository: exact extracts up from about 91 % to over 99 %).
+- **Multi-line initializers** in `Fields:` and `Props:` lists are printed on one line, with line
+  breaks shown as `\n`, so a reader no longer mistakes their content for tags.
+- **The YAML and JSON forms** no longer nest a line of foreign text ending in `/>` (XAML in a
+  string, for example) as a tag, which produced phantom keys and could make the JSON conversion
+  fail on a large export. Their spec text now says it describes the tag form they were converted
+  from. Converting documents with many same-named keys is much faster (seconds to milliseconds).
+- **Slices count coupling over the whole type.** In `explain_symbol` and the other slice tools,
+  `ce` and the QUALITY_HOTSPOTS line count over the type's full declaration, and where the slice
+  prints `ce`, the `<DEPENDENCIES>` block ends with an `OutsideThisSlice:` group naming the counted
+  dependencies the slice does not show, so the number and the list agree.
+- **Local function labels** in call lists and flows no longer carry an absolute source path.
+- **Smaller fixes:** a bullet marker is stripped from your prompt rules only where it is one
+  (`-1 means no limit` keeps its minus, `**Never**` its emphasis); the COMPRESSION legend says each
+  sub-block appears only where it has content; a budget raised to the 8,000-token floor renders
+  exactly what the floor renders, with the raise note on top; a `prepare_task` template render that
+  produces only whitespace falls back to the lean render.
+
+### Coupling, quality and effects
+
+- **A type's own nested types are no outgoing coupling.** Using its own nested types counted as
+  efferent coupling: Ce was inflated, and the DEPENDENCIES block listed them. They are left out of
+  Ce, the DEPENDENCIES block, the hotspot line, `solution_metrics` and the desktop app's symbol
+  detail now. Where a short name could also mean another type of that name (in the solution or in
+  a referenced package), it stays counted. `find_usages` on a nested type still lists the outer
+  type, and Ca is unchanged.
+- **One entry per type, whatever its spelling.** `Dim[]`, `Point?` or a pointer beside `Dim` and
+  `Point` were separate dependency entries, so Ce counted one type two or more times. They fold
+  into one entry now; Ce can only drop.
+- **A documentation link is no layer edge.** A type named only in a `<see cref>` no longer raises
+  a layer violation; `nameof` still counts.
+- **Namespace coupling** credits the namespace of the type a reference provably means, not every
+  type of that name.
+- **The circular-dependency insight reads as a set:** "N namespaces reference each other:
+  {A, B, C}" instead of an arrow path whose steps need not all exist.
+- **Cognitive complexity** scores a run of `or`/`and` pattern combinators.
+- **Role spelling:** an `<ai>` role that differs from an inferred role only in letter case is
+  written the inferred way, so one role no longer shows up twice.
+- **`Debug.Assert` is not logging, `HttpRequestOptions` is not network.** A call of
+  `Debug.Assert` or `Debug.Fail` no longer gives a method the `logging` effect, and neither do
+  its callers inherit it; reading `HttpRequestOptions` no longer counts as `network`. Effect
+  filters return fewer methods where that was all they did.
+- **The security insight covers top-level programs.** `security-sensitive-calls` now reports
+  risky calls written in top-level statements, as a line for the file
+  (`App/Program.cs (top-level): ...`) whose locator has a `file` and no type or member, and the
+  title counts methods and top-level files. `list_insights` with `files` keeps such a line when its
+  file is in the list. Scripts that read insight locators must accept a locator with only a `file`.
+- **`find_god_objects` names the test class it filtered.** With the default
+  `includeTests: false`, when the largest test-project class would rank within the list, a note
+  names it and the place it would take, and how to include it.
+- **`evaluate_change_set` no longer blocks a change for adding a test.** A complex method whose
+  "a test reaches it" line improved because the change set added a test counted as a new finding,
+  so `block_on_warning` blocked it; now only losing the last test counts. `diff_review` uses the
+  same gate. A new overload whose line reads exactly like an existing one is reported.
+- **`find_by_complexity_and_coverage`** keeps overloads apart, so a covered overload no longer
+  appears uncovered because of its namesake. `find_structural_twins` and `check_pattern_drift` say
+  how many methods a type name also names, and print owners with colliding names in full.
+- **`find_by_resource_leak` checks the exception path.** A disposable your code creates and then
+  awaits across before handing it on or disposing it, with nothing protecting it if an exception is
+  thrown, is reported in a new `exceptionPathTypes` list, with `exceptionPathLocalsChecked` as the
+  count of what was judged. The earlier results are unchanged.
+- **`find_by_semantics` names the axes without values.** On an empty answer, a queried axis on
+  which nothing carries a value at your confidence was simply missing; it is now listed in
+  `unclassifiedAxes`, so every queried axis is in exactly one of the two lists.
+
+### Solution configuration
+
+- **`solution_config_status` works without a database:** without `dbPath` it answers from the
+  `.aicb.json` file and the defaults, and opens or creates nothing. A `dbPath` that does not exist
+  is still refused.
+- **`init_solution_config` weighs the referenced namespaces** (see "Who is affected"): each item
+  counts the hand-written files that use it (`documents`), build-written files are counted apart
+  (`generatedDocuments`), and the list starts with the heaviest. Test attributes found only inside a longer name are no longer reported.
+- **Excluded framework areas are flagged.** `init_solution_config` (`frameworkApiAreas`) and
+  `check_solution_config_drift` (`exclusion.excludedApiAreas`) name an area the exclusion list
+  removes (the built-in one for `init_solution_config`, yours for the drift check) although a large
+  share of your public API names it (`System.Data` in a data-access
+  library, for example), with the keep rule to add. On a never-configured solution, the drift check
+  evaluates this one signal.
+- **Project names with brackets keep their name.** A project file such as `Foo(Legacy).csproj` was
+  merged with `Foo.csproj`; only a trailing group that looks like a target framework, such as
+  `(net8.0)`, is dropped now (so `Foo(v2)` still merges with `Foo`).
+
+### Remembered codebases
+
+- **Three labels instead of one.** In a session recalled from an older snapshot,
+  `GENERATED CODE NOT KNOWN` is replaced by `GENERATOR GAPS NOT KNOWN`,
+  `UNINDEXED CODE NOT KNOWN` and `MARKUP-ONLY COMPONENTS NOT KNOWN`, one per missing fact, and all
+  six "NOT KNOWN" notes now read alike: what the snapshot lacks, what that means for this answer,
+  and that `refresh_remembered` fills it in. Match `NOT KNOWN:` if a script looks for them. Live
+  sessions are not affected.
+- **Automatic snapshot cleanup keeps pinned snapshots.** When the cap on automatic snapshots
+  removed old ones, a snapshot that a saved session or run still pointed at could be deleted. It
+  is kept now, and the cleanup no longer reads every snapshot to decide (on a large database:
+  seconds to milliseconds).
+
+### MCP protocol
+
+- **The handshake no longer declares `tools.listChanged`.** Both `initialize` and
+  `server/discover` answered `"tools": {"listChanged": true}`, although the server never sends a
+  tool-list notification - the tool list is fixed for the life of the server process, and a profile
+  switch takes effect at the next start. They answer `"tools": {}` now, and a
+  `subscriptions/listen` is no longer granted `toolsListChanged`. `tools/list` is unchanged. A
+  client that waited for such notifications can treat the list as static, which it is.
+- **`batch` records misspelled arguments of its sub-queries,** so `usage_report` counts such a
+  batch call among the calls with unrecognized arguments.
+
+### `aicb init`, the symbol guard and the skill
+
+- **The symbol guard knows `.slnx` and `.slnf`.** The guard `aicb init` installs recognized a
+  solution root only by a `.sln` file, so it switched itself off in a repository that has only a
+  `.slnx` or `.slnf`. All three forms count now.
+- **The guard reads search patterns fully:** a brace pattern (`*.{xaml,cs}`) is judged by every
+  member, not the first, and a search that only excludes some files (`rg -g '!*.md'`,
+  `grep --exclude=*.md`) is treated as a search that still covers `.cs` files.
+- **The `aicb-csharp-context` skill** now asks, before an edit, to check the two channels the C#
+  fan-in does not carry: markup (`find_binding_usages`, `find_resource_usages`) and text that
+  tests pin (a description, a message string). Its markup paragraph was rewritten.
+- `aicb init` keeps files that exist; run `aicb init --force` to replace the installed guard and
+  skill with these versions. `--force` also rewrites aicb's own server entry in `.mcp.json` and in
+  the Codex and OpenCode configuration, and its hook wiring, so a hand-edited aicb entry is replaced.
+- **`list_skills`** explains that a core tool can be outside the pool because the active profile
+  denies it or because `AICB_MCP_TOOLS` hides it.
+- The descriptions and help texts that named `.sln` alone (`--solution`, `aicb call --sln`, the
+  memory and session tools) name `.sln`, `.slnx` and `.slnf`.
+
+### Desktop app
+
+- **The MCP usage panel shows your pool on a fresh install.** It knew the active profile's tools
+  only after the profile editor had been opened; now the pool tile reads, for example, "13 of 54",
+  the tools never called are listed, and the export carries the pool.
+- **The protocol revision is explained correctly.** The panel no longer says the client's SDK
+  version fixes the protocol revision: it explains that the revision is the one each call arrived
+  on, how the two ways of connecting differ, and why two rows of one client version can differ only
+  in revision.
+- **All solution pickers accept `.sln`, `.slnx` and `.slnf`** (the Layer Profiles, Namespace
+  Exclusions and Relocate Solution pickers offered `.sln`, one of them `.slnx` too).
+- **Snapshots load faster:** the Snapshots tab, the snapshot history of the Solutions tab and the
+  Insights debt trend no longer read the stored analyses to fill their lists (on a large database:
+  about a quarter of a second to a few milliseconds for the Snapshots tab).
+- **Recent lists and database switches are sturdier:** a failed write of a recent list no longer
+  leaves a phantom entry or fails the solution load or database switch it belongs to; the Storage
+  page shows the warning of a switch that succeeded. Blank entries in a hand-edited settings file
+  are dropped.
+- **The IN USE tooltip on master data tells the truth:** deleting such an entry is not blocked;
+  the entries that reference it then point at one that no longer exists.
+- **The symbol detail** leaves a type's own nested types out of its dependencies and its Ce; a
+  top-level line of the security insight offers no reveal, suppress or dismiss action (it has no
+  type to point at).
+- The selection rule "exclude test classes" also excludes a type that declares a test method, with
+  all its partial parts.
+
+### Other changes
+
+- The README's GitHub Action example pins this release (`@v0.5.510.1` with `version: 0.5.510.1`).
+- The public tool reference (`docs/TOOLS.md`) describes this release.
+- The three manuals and their PDFs still describe 0.5.505.1; the changes above are not in them yet.
+
 ## 0.5.505.1 (2026-10-26) - find_usages lists production users on request, find_implementations names what each implementer closes a generic interface with, and get_diagnostics lists only the errors of a failing compile
 
 **Who is affected.** Everyone on the MCP server: reconnect your client once - 14 tools of the

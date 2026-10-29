@@ -199,7 +199,7 @@ proof:
 | Signal | What it means | What to do |
 |---|---|---|
 | `staleness` | Saved source differs from the analyzed graph | Refresh when the response is not current |
-| `incompleteProjects` or an inconclusive verdict | Project references were not resolved completely | Restore/build, then `refresh_session(force: true)` |
+| `incompleteProjects` or an inconclusive verdict | Project references were not resolved completely | Restore, then `refresh_session`; after a build, `refresh_session(force: true)` |
 | `truncated` with `totalFound` | The response contains only a bounded subset | Narrow or paginate the query |
 | ambiguous candidates or `mergedNamesakes` | The name did not identify one symbol | Use a qualified type or member name |
 | `origin: "Recalled"` | The model was restored from persistent memory without a live workspace | Use `refresh_remembered` for live-only detail and line numbers |
