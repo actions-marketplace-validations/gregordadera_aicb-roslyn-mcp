@@ -131,10 +131,11 @@ Three per-solution settings decide how aicb reads your code: the **layer profile
 
 **Response.**
 - `solutionPath`.
-- `declaredNamespaces` - the solution's own namespaces, production-focused (test-project and framework/generated namespaces are dropped); the source for layer rules. Capped at 300 entries with `count`, `totalFound` and `truncated`.
-- `referencedNamespaces` - every namespace referenced through `using`, including namespaces owned by the solution itself. Capped at 300 entries. When proposing exclusion rules, use only its framework and third-party subset.
-- `testProjects` - the projects the default heuristic classifies as test projects. Capped at 300 entries.
+- `declaredNamespaces` - the solution's own namespaces, production-focused (test-project and framework/generated namespaces are dropped); the source for layer rules. A namespace starting with `Microsoft`, `System` or `JetBrains` is kept when it matches a production project's assembly name or root namespace, so a framework library's own namespaces give layer-rule material. Capped at 300 entries with `count`, `totalFound` and `truncated`; the cut keeps the shallowest namespaces, and `declaredNamespacesOmitted` names where the left-out ones sit.
+- `referencedNamespaces` - the namespaces referenced through `using`, without the solution's own namespaces, which it counts in `referencedNamespacesOwnOmitted`. Capped at 300 entries. When proposing exclusion rules, use only its framework and third-party subset.
+- `testProjects` - the projects the default heuristic classifies as test projects, one name per project (the builds of a multi-targeted test project are not listed apart). Capped at 300 entries. A project whose name matches only through `Spec` or `Specs` counts as a test project only when it contains test methods.
 - `detectedTestAttributes` - the test-attribute markers that actually occur in the code, out of the built-in set (`Fact`, `Theory`, `Test`, `TestMethod`, `TestCase`). Not capped; the set is small by construction.
+- `testAttributeUses` - per detected marker, the attributes that count under it, with method counts (top 10 per marker): `ConditionalFact` under `Fact`, for example.
 - `proposalFormat` - a format hint that spells out the expected `proposalJson` and `testProposalJson` shapes.
 
 **Notes and limits.**
@@ -189,6 +190,7 @@ Three per-solution settings decide how aicb reads your code: the **layer profile
 
 **Notes and limits.**
 - At least one axis must be non-empty; empty arrays and slots are skipped, and a proposal that leaves all three axes empty is rejected with a message naming the accepted forms.
+- Every rule of the proposal is applied; no list is cut at a fixed length, so `layerRuleCount` and the other counts in the answer can exceed 80. (The desktop app's layer wizard keeps the first 80 rules per list of a model's answer and says so in a warning.)
 - Auto-generated display names follow the pattern `LLM init (<solution name>) - layers`, `- exclusions` and `- tests`.
 - The tool writes to **two places at once**: the config database, and the git-tracked `<SolutionName>.aicb.json` sidecar next to the .sln. The returned `sidecarPath` comes with the explicit request to commit it, so the portable configuration travels with the repository. A later database-free analysis consumes its layer/exclusion fallback and analysis scope; the sidecar test definition is setup material rather than part of that resolution chain. This sidecar write is headless and does not ask for overwrite confirmation, unlike the GUI's export.
 - If the sidecar write fails (for example in a read-only directory), the database write is **not** rolled back; the failure is disclosed in `warnings` and `sidecarPath` is omitted.
@@ -285,7 +287,7 @@ The four memory tools persist an analyzed codebase in an aicb database and bring
 
 **Notes and limits.**
 - A recalled model has **no line numbers**, and line-number-dependent insights are degraded. Call `refresh_remembered` for a live re-analysis.
-- `stale` is `true` when the files changed since the snapshot, or the payload schema or the analyzer identity differs. For a stale result, `reason` lists these possible causes in one fixed sentence; it does not identify which one occurred.
+- `stale` is `true` when the files changed since the snapshot, a project was added to or removed from the solution file since then, or the payload schema or the analyzer identity differs. A snapshot stored by an earlier version holds no project list; the answer then says that the project list was not compared. For a stale result, `reason` lists these possible causes in one fixed sentence; it does not identify which one occurred.
 - The recalled model is served **even when it is stale** - that is the point of instant cross-process context. Treat a stale answer as a hint and refresh before relying on it.
 - The `.cshtml` view census, the generated-code censuses and the top-level-statement facts travel with the snapshot, so the recalled session's answers carry the same notes as a live one. Where the snapshot was stored before such a fact was recorded, the affected answers say `VIEWS NOT KNOWN`, `GENERATED CODE NOT KNOWN`, `TOP-LEVEL CREATIONS NOT KNOWN` or `TOP-LEVEL EFFECTS NOT KNOWN` instead (see "Recall safety" under "Recurring conventions across the catalog"); `refresh_remembered` clears them.
 - The lookup is read-only: a solution that was never remembered is rejected with a message telling you to call `remember_codebase` first.
@@ -386,7 +388,7 @@ These three tools browse and import the master data of an aicb database rather t
 - `nextStep` - the follow-up instruction (see below).
 
 **Notes and limits.**
-- What is written: the guard script and the harness's wiring entry - `.claude/settings.json`, `.codex/hooks.json` or `opencode.json` - and nothing else. No `.mcp.json` and no skills, and only inside the directory of the solution the session refers to. For OpenCode the guard is delivered as a plugin under `.opencode/plugins/` plus the `opencode.json` entry.
+- What is written: the guard script and the harness's wiring entry - `.claude/settings.json`, `.codex/hooks.json` or `opencode.json` - and, for Claude Code, also the session-start hook `.claude/hooks/aicb-skill-sync.mjs` with its `SessionStart` entry, which keeps the aicb skill files in step (see "Keeping the skills in step: `aicb skills sync`"); nothing else. No `.mcp.json` and no skills, and only inside the directory of the solution the session refers to. For OpenCode the guard is delivered as a plugin under `.opencode/plugins/` plus the `opencode.json` entry.
 - An existing guard or wiring is kept unless `force=true`, so a re-run cannot silently discard your own edits - an edited exemption list is the obvious thing to lose here.
 - The tool installs for the calling harness by default. If the client announces no name aicb can map to a harness, or you name an unknown one, the call is refused with the list of known harnesses rather than writing a configuration nothing would read.
 - After the call: restart or reconnect the MCP client so it loads the new wiring, then call `refresh_session` so the session stops reporting the guard as missing. The guard runs in the client, which reads its configuration at startup, so it is not active before the reconnect.

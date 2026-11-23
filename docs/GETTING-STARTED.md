@@ -7,7 +7,7 @@ grepping, in about five minutes.
 
 | You want ... | Install | Runs on |
 |---|---|---|
-| your coding agent (Claude Code, Codex, Cursor, ...) to understand your C# code | the `aicb` .NET tool `aicb-roslyn-mcp` from [nuget.org](https://www.nuget.org/packages/aicb-roslyn-mcp) | Windows, Linux, macOS |
+| your coding agent (Claude Code, Codex, OpenCode, Cursor, ...) to understand your C# code | the `aicb` .NET tool `aicb-roslyn-mcp` from [nuget.org](https://www.nuget.org/packages/aicb-roslyn-mcp) | Windows, Linux, macOS |
 | to decide by hand what a model gets to see, and look at the result | the desktop app from [GitHub Releases](https://github.com/gregordadera/aicb-roslyn-mcp/releases) | Windows |
 
 Both share one analysis engine. The desktop download also contains the CLI, so on
@@ -18,8 +18,8 @@ Windows one download covers both.
 - **To analyze a solution you need MSBuild on the machine** - a .NET SDK or Visual
   Studio. This applies to every form: opening a solution runs its MSBuild design-time
   build, and without MSBuild nothing can be loaded.
-- **The .NET tool additionally needs the .NET 10 SDK** (it is what installs and runs a
-  .NET tool). Without .NET 10 the tool runs on the next newer .NET on the machine and needs
+- **The .NET tool runs on .NET 10. Installing it needs the .NET 10 SDK**, which also
+  provides the MSBuild the analysis uses. Without .NET 10 the tool runs on the next newer .NET on the machine and needs
   that version's SDK; a machine that has only .NET 8 or .NET 9 cannot start it. If it
   reports that MSBuild could not be registered, install the .NET 10 SDK or set
   `DOTNET_ROLL_FORWARD=LatestMajor` (a preview .NET additionally needs
@@ -131,7 +131,8 @@ aicb knows (`.claude/`, `.codex/`, `.opencode/`), or a `CLAUDE.md` for Claude Co
 `aicb init` also installs the **symbol guard** there. The guard *refuses* a `Grep`
 search for a C# symbol name and points the agent at the aicb tool that answers it
 properly; once the agent has asked aicb about that name (Claude Code), or where aicb
-is not available, such a grep goes through with a note. Reading a file and a shell
+is not available, or when the search targets another solution or no solution at all,
+such a grep goes through with a note. Reading a file and a shell
 `grep` are never refused - they get at most a reminder. That is what makes the
 tools actually get used - and it is the one part of the install that changes what
 your agent may do. To skip it: `aicb init --hooks none` (the server is still registered). To remove an installed guard,
